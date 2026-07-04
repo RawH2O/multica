@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueposition"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/notificationpush"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -478,6 +479,7 @@ func (s *AutopilotService) notifyAutopilotSubscribersOnCreate(
 			)
 			continue
 		}
+		notificationpush.SendBarkForInbox(ctx, item.RecipientType, item.Title, item.Body.String)
 		s.Bus.Publish(events.Event{
 			Type:        protocol.EventInboxNew,
 			WorkspaceID: util.UUIDToString(ap.WorkspaceID),
@@ -1381,6 +1383,7 @@ func (s *AutopilotService) getIssuePrefix(workspaceID pgtype.UUID) string {
 //   - public_to agent -> workspace target admits any workspace-member creator
 //     (and agent-created autopilots as workspace principals); member target
 //     admits the matching creator; team targets are inert.
+//
 // Fail-closed on any lookup error.
 func (s *AutopilotService) canCreatorInvokeAgent(ctx context.Context, ap db.Autopilot, agent db.Agent) bool {
 	creatorID := util.UUIDToString(ap.CreatedByID)

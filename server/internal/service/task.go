@@ -17,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/notificationpush"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -2910,6 +2911,7 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 		slog.Error("quick-create completion: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
 		return
 	}
+	notificationpush.SendBarkForInbox(ctx, item.RecipientType, item.Title, item.Body.String)
 	s.publishQuickCreateInbox(item, qc.WorkspaceID, util.UUIDToString(task.AgentID), issue.Status)
 }
 
@@ -2952,6 +2954,7 @@ func (s *TaskService) notifyQuickCreateFailed(ctx context.Context, task db.Agent
 		slog.Error("quick-create failure: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
 		return
 	}
+	notificationpush.SendBarkForInbox(ctx, item.RecipientType, item.Title, item.Body.String)
 	s.publishQuickCreateInbox(item, qc.WorkspaceID, util.UUIDToString(task.AgentID), "")
 }
 

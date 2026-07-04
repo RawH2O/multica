@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/notificationpush"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -18,7 +19,6 @@ type mention struct {
 	Type string // "member", "agent", "issue", or "all"
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
-
 
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
@@ -78,19 +78,19 @@ var parentBubbleNotifTypes = map[string]bool{
 // notifTypeToGroup maps each InboxItemType to a user-configurable preference
 // group. Types not in this map are always delivered (not configurable).
 var notifTypeToGroup = map[string]string{
-	"issue_assigned":  "assignments",
-	"unassigned":      "assignments",
-	"assignee_changed": "assignments",
-	"status_changed":  "status_changes",
-	"new_comment":     "comments",
-	"mentioned":       "comments",
-	"priority_changed": "updates",
+	"issue_assigned":     "assignments",
+	"unassigned":         "assignments",
+	"assignee_changed":   "assignments",
+	"status_changed":     "status_changes",
+	"new_comment":        "comments",
+	"mentioned":          "comments",
+	"priority_changed":   "updates",
 	"start_date_changed": "updates",
-	"due_date_changed": "updates",
-	"task_completed":  "agent_activity",
-	"task_failed":     "agent_activity",
-	"agent_blocked":   "agent_activity",
-	"agent_completed": "agent_activity",
+	"due_date_changed":   "updates",
+	"task_completed":     "agent_activity",
+	"task_failed":        "agent_activity",
+	"agent_blocked":      "agent_activity",
+	"agent_completed":    "agent_activity",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -349,6 +349,7 @@ func notifyIssueSubscribers(
 		}
 
 		notified[subID] = true
+		notificationpush.SendBarkForInbox(ctx, item.RecipientType, item.Title, item.Body.String)
 		resp := inboxItemToResponse(item)
 		resp["issue_status"] = issueStatus
 		bus.Publish(events.Event{
@@ -414,6 +415,7 @@ func notifyDirect(
 	}
 
 	resp := inboxItemToResponse(item)
+	notificationpush.SendBarkForInbox(ctx, item.RecipientType, item.Title, item.Body.String)
 	resp["issue_status"] = issueStatus
 	bus.Publish(events.Event{
 		Type:        protocol.EventInboxNew,
@@ -522,6 +524,7 @@ func notifyMentionedMembers(
 			slog.Error("mention inbox creation failed", "mentioned_id", id, "error", err)
 			continue
 		}
+		notificationpush.SendBarkForInbox(context.Background(), item.RecipientType, item.Title, item.Body.String)
 		resp := inboxItemToResponse(item)
 		resp["issue_status"] = issueStatus
 		bus.Publish(events.Event{
