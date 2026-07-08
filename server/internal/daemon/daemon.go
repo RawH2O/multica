@@ -2162,15 +2162,20 @@ func (d *Daemon) handleLocalSkillImport(ctx context.Context, rt Runtime, pending
 	})
 }
 
-// runtimeReportBackoffs defines the retry schedule for delivering any
+// asyncReportBackoffs defines the retry schedule for delivering any
 // daemon→server async result (model list, local-skill list, local-skill
-// import). First attempt runs immediately, then we back off. The sum
-// (≈6.5s) stays well under the server-side running timeout (60s) so a
-// report that eventually lands still updates the request instead of
-// racing a timeout transition.
+// import, CLI update status). First attempt runs immediately, then we
+// back off. The sum (≈6.5s) stays well under the server-side running
+// timeout (60s) so a report that eventually lands still updates the
+// request instead of racing a timeout transition.
 //
 // Overridable for tests to avoid real sleeps.
-var runtimeReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
+var asyncReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
+
+// runtimeReportBackoffs is an alias for asyncReportBackoffs, kept for
+// backward compatibility with existing test code that patches this
+// variable directly.
+var runtimeReportBackoffs = asyncReportBackoffs
 
 // reportLocalSkillListResult delivers a list-report to the server with retry
 // on transient failures. See reportRuntimeResultWithRetry for semantics.
@@ -2198,8 +2203,58 @@ func (d *Daemon) reportModelListResult(ctx context.Context, rt Runtime, requestI
 	})
 }
 
+// reportWithRetry is the shared retry loop used by all daemon→server async
+// report methods (runtime results, CLI update status). It retries `fn` on
+// 5xx / network errors and stops on success, 4xx, or after exhausting
+// `backoffs`. The `labels` slice is used in all log messages as slog
+// key-value pairs (callers must pass them in pairs, e.g. "key1", val1, "key2", val2).
+//
+// Why this exists: the server persists the report through a Redis / DB
+// write; on a transient store failure it correctly returns 500. Without a
+// client-side retry the daemon would fire once, swallow the error, and the
+// pending request stays in "running" on the server until its timeout.
+// 4xx is treated as permanent (request-not-found, cross-workspace token
+// rejected, bad body) — retrying those just wastes heartbeat cycles.
+func (d *Daemon) reportWithRetry(ctx context.Context, backoffs []time.Duration, labels []any, fn func(context.Context) error) {
+	var lastErr error
+	for attempt, wait := range backoffs {
+		if wait > 0 {
+			select {
+			case <-ctx.Done():
+				d.logger.Error("async report cancelled",
+					append([]any{"attempt", attempt, "error", ctx.Err()}, labels...)...)
+				return
+			case <-time.After(wait):
+			}
+		}
+		err := fn(ctx)
+		if err == nil {
+			if attempt > 0 {
+				d.logger.Info("async report succeeded after retry",
+					append([]any{"attempt", attempt + 1}, labels...)...)
+			}
+			return
+		}
+		lastErr = err
+
+		// 4xx is permanent (request expired, workspace mismatch, malformed
+		// body). No amount of retrying will make it succeed.
+		var reqErr *requestError
+		if errors.As(err, &reqErr) && reqErr.StatusCode >= 400 && reqErr.StatusCode < 500 {
+			d.logger.Error("async report rejected — not retrying",
+				append([]any{"status", reqErr.StatusCode, "error", err}, labels...)...)
+			return
+		}
+
+		d.logger.Warn("async report failed — will retry",
+			append([]any{"attempt", attempt + 1, "error", err}, labels...)...)
+	}
+	d.logger.Error("async report exhausted retries",
+		append([]any{"error", lastErr}, labels...)...)
+}
+
 // reportRuntimeResultWithRetry retries `fn` on 5xx / network errors and
-// stops on success, 4xx, or after exhausting runtimeReportBackoffs.
+// stops on success, 4xx, or after exhausting asyncReportBackoffs.
 //
 // Why this exists: the server persists the report through a Redis / DB
 // write; on a transient store failure it correctly returns 500. Without a
@@ -2210,45 +2265,9 @@ func (d *Daemon) reportModelListResult(ctx context.Context, rt Runtime, requestI
 // cross-workspace token rejected, bad body) — retrying those just wastes
 // heartbeat cycles.
 func (d *Daemon) reportRuntimeResultWithRetry(ctx context.Context, kind, runtimeID, requestID string, fn func(context.Context) error) {
-	var lastErr error
-	for attempt, wait := range runtimeReportBackoffs {
-		if wait > 0 {
-			select {
-			case <-ctx.Done():
-				d.logger.Error("runtime async report cancelled",
-					"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
-					"attempt", attempt, "error", ctx.Err())
-				return
-			case <-time.After(wait):
-			}
-		}
-		err := fn(ctx)
-		if err == nil {
-			if attempt > 0 {
-				d.logger.Info("runtime async report succeeded after retry",
-					"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
-					"attempt", attempt+1)
-			}
-			return
-		}
-		lastErr = err
-
-		// 4xx is permanent (request expired, workspace mismatch, malformed
-		// body). No amount of retrying will make it succeed.
-		var reqErr *requestError
-		if errors.As(err, &reqErr) && reqErr.StatusCode >= 400 && reqErr.StatusCode < 500 {
-			d.logger.Error("runtime async report rejected — not retrying",
-				"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
-				"status", reqErr.StatusCode, "error", err)
-			return
-		}
-
-		d.logger.Warn("runtime async report failed — will retry",
-			"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
-			"attempt", attempt+1, "error", err)
-	}
-	d.logger.Error("runtime async report exhausted retries",
-		"kind", kind, "runtime_id", runtimeID, "request_id", requestID, "error", lastErr)
+	d.reportWithRetry(ctx, runtimeReportBackoffs, []any{
+		"kind", kind, "runtime_id", runtimeID, "request_id", requestID,
+	}, fn)
 }
 
 // handleUpdate performs the CLI update when triggered by the server via heartbeat.
@@ -2323,14 +2342,13 @@ func (d *Daemon) runUpdate(targetVersion string) (string, error) {
 	return out, nil
 }
 
-// updateReportBackoffs defines the retry schedule for delivering CLI update
-// status back to the server. This mirrors localSkillReportBackoffs because
-// both features have the same user-visible failure mode: the daemon completed
-// work locally, but a transient report failure leaves the UI waiting until the
+// updateReportBackoffs is an alias for asyncReportBackoffs, kept for
+// backward compatibility with existing test code that patches this
+// variable directly. Both features share the same retry schedule because
+// they have the same user-visible failure mode: the daemon completed work
+// locally, but a transient report failure leaves the UI waiting until the
 // server-side request times out.
-//
-// Overridable for tests to avoid real sleeps.
-var updateReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
+var updateReportBackoffs = asyncReportBackoffs
 
 func (d *Daemon) reportUpdateResult(ctx context.Context, runtimeID, updateID string, payload map[string]any) {
 	d.reportUpdateResultWithRetry(ctx, runtimeID, updateID, func(ctx context.Context) error {
@@ -2339,44 +2357,9 @@ func (d *Daemon) reportUpdateResult(ctx context.Context, runtimeID, updateID str
 }
 
 func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, updateID string, fn func(context.Context) error) {
-	var lastErr error
-	for attempt, wait := range updateReportBackoffs {
-		if wait > 0 {
-			select {
-			case <-ctx.Done():
-				d.logger.Error("CLI update report cancelled",
-					"runtime_id", runtimeID, "update_id", updateID,
-					"attempt", attempt, "error", ctx.Err())
-				return
-			case <-time.After(wait):
-			}
-		}
-
-		err := fn(ctx)
-		if err == nil {
-			if attempt > 0 {
-				d.logger.Info("CLI update report succeeded after retry",
-					"runtime_id", runtimeID, "update_id", updateID,
-					"attempt", attempt+1)
-			}
-			return
-		}
-		lastErr = err
-
-		var reqErr *requestError
-		if errors.As(err, &reqErr) && reqErr.StatusCode >= 400 && reqErr.StatusCode < 500 {
-			d.logger.Error("CLI update report rejected — not retrying",
-				"runtime_id", runtimeID, "update_id", updateID,
-				"status", reqErr.StatusCode, "error", err)
-			return
-		}
-
-		d.logger.Warn("CLI update report failed — will retry",
-			"runtime_id", runtimeID, "update_id", updateID,
-			"attempt", attempt+1, "error", err)
-	}
-	d.logger.Error("CLI update report exhausted retries",
-		"runtime_id", runtimeID, "update_id", updateID, "error", lastErr)
+	d.reportWithRetry(ctx, updateReportBackoffs, []any{
+		"runtime_id", runtimeID, "update_id", updateID,
+	}, fn)
 }
 
 // tryEnterClaim records the intent to call ClaimTask. Returns true if the
