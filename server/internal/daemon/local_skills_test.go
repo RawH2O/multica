@@ -26,6 +26,33 @@ func writeTestLocalSkill(t *testing.T, root, rel string, files map[string]string
 	return skillDir
 }
 
+func writeTestClaudePlugin(t *testing.T, home, id, name string, enabled bool) string {
+	t.Helper()
+	installPath := filepath.Join(home, ".claude", "plugins", "cache", name, "1.0.0")
+	if err := os.MkdirAll(filepath.Join(installPath, ".claude-plugin"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest := `{"name":"` + name + `","skills":"./skills","mcpServers":"./mcp.json"}`
+	if err := os.WriteFile(filepath.Join(installPath, ".claude-plugin", "plugin.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".claude", "plugins"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	installed := `{"version":2,"plugins":{"` + id + `":[{"scope":"user","installPath":"` + installPath + `"}]}}`
+	if err := os.WriteFile(filepath.Join(home, ".claude", "plugins", "installed_plugins.json"), []byte(installed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(home, ".claude"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	settings := `{"enabledPlugins":{"` + id + `":` + map[bool]string{true: "true", false: "false"}[enabled] + `}}`
+	if err := os.WriteFile(filepath.Join(home, ".claude", "settings.json"), []byte(settings), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return installPath
+}
+
 func TestListRuntimeLocalSkills_Claude(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -67,6 +94,159 @@ func TestListRuntimeLocalSkills_Claude(t *testing.T) {
 	}
 	if skill.SourcePath != "~/.claude/skills/review-helper" {
 		t.Fatalf("source_path = %q", skill.SourcePath)
+	}
+	if !skill.CanDisable {
+		t.Fatal("claude runtime skill should be controllable")
+	}
+}
+
+func TestListRuntimeLocalSkills_Mcode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".minimax", "skills"), "mcode-review", map[string]string{
+		"SKILL.md": "---\nname: MCode Review\ndescription: Review code with MiniMax Code\n---\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("mcode")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported || len(skills) != 1 {
+		t.Fatalf("supported=%v skills=%#v", supported, skills)
+	}
+	if skills[0].SourcePath != "~/.minimax/skills/mcode-review" {
+		t.Fatalf("source_path = %q", skills[0].SourcePath)
+	}
+}
+
+// TestListRuntimeLocalSkills_Codebuddy is the regression guard for a bug
+// where CodeBuddy was treated as a drop-in alias for Claude and local
+// (user-level) skills were discovered from ~/.claude/skills. CodeBuddy Code
+// is a Claude Code fork but ships its own native config directory and does
+// NOT read ~/.claude/skills by default — see
+// https://www.codebuddy.ai/docs/cli/skills ("User-level Skills:
+// ~/.codebuddy/skills/"). Discovery must use ~/.codebuddy/skills instead.
+func TestListRuntimeLocalSkills_Codebuddy(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".codebuddy", "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: CodeBuddy Review\ndescription: Review code with CodeBuddy\n---\n# CodeBuddy Review\n",
+	})
+	// ~/.claude/skills is not a CodeBuddy discovery root, so this must not
+	// appear for the codebuddy provider.
+	writeTestLocalSkill(t, filepath.Join(home, ".claude", "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: Claude Review\ndescription: Should not appear for codebuddy\n---\n# Claude Review\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("codebuddy")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("codebuddy should be supported")
+	}
+	if len(skills) != 1 {
+		t.Fatalf("expected 1 skill, got %d: %+v", len(skills), skills)
+	}
+
+	skill := skills[0]
+	if skill.Key != "review-helper" {
+		t.Fatalf("key = %q, want review-helper", skill.Key)
+	}
+	if skill.Name != "CodeBuddy Review" {
+		t.Fatalf("name = %q, want CodeBuddy Review", skill.Name)
+	}
+	if skill.SourcePath != "~/.codebuddy/skills/review-helper" {
+		t.Fatalf("source_path = %q, want ~/.codebuddy/skills/review-helper", skill.SourcePath)
+	}
+	if skill.CanDisable {
+		t.Fatal("codebuddy runtime skill controls are not supported yet")
+	}
+}
+
+func TestRuntimeLocalSkills_CodebuddyExcludesClaudePluginSkills(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".codebuddy", "skills"), "codebuddy-only", map[string]string{
+		"SKILL.md": "---\nname: CodeBuddy Only\n---\n",
+	})
+	installPath := writeTestClaudePlugin(t, home, "paper-desktop@paper", "paper-desktop", true)
+	writeTestLocalSkill(t, filepath.Join(installPath, "skills"), "design-to-code", map[string]string{
+		"SKILL.md": "---\nname: Claude Plugin Skill\n---\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("codebuddy")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("codebuddy should be supported")
+	}
+	if len(skills) != 1 || skills[0].Key != "codebuddy-only" {
+		t.Fatalf("CodeBuddy must not list Claude plugin skills, got %#v", skills)
+	}
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("codebuddy", "paper-desktop:design-to-code")
+	if !supported {
+		t.Fatal("codebuddy should be supported for import")
+	}
+	if err == nil || err.Error() != "local skill not found" {
+		t.Fatalf("load Claude plugin skill for CodeBuddy err = %v, want local skill not found", err)
+	}
+	if bundle != nil {
+		t.Fatalf("load Claude plugin skill for CodeBuddy bundle = %#v, want nil", bundle)
+	}
+}
+
+func TestListRuntimeLocalSkills_ClaudeEnabledPlugin(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	installPath := writeTestClaudePlugin(t, home, "paper-desktop@paper", "paper-desktop", true)
+	writeTestLocalSkill(t, filepath.Join(installPath, "skills"), "design-to-code", map[string]string{
+		"SKILL.md": "---\nname: Design to code\ndescription: Turn a design into code\n---\n# Design\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("claude")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !supported || len(skills) != 1 {
+		t.Fatalf("supported=%v skills=%#v", supported, skills)
+	}
+	got := skills[0]
+	if got.Key != "paper-desktop:design-to-code" || got.Name != "paper-desktop:design-to-code" {
+		t.Fatalf("plugin skill identity = %#v", got)
+	}
+	if got.Root != localSkillRootPlugin || got.Plugin != "paper-desktop@paper" {
+		t.Fatalf("plugin skill origin = %#v", got)
+	}
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("claude", got.Key)
+	if err != nil || !supported {
+		t.Fatalf("load plugin bundle: supported=%v err=%v", supported, err)
+	}
+	if bundle.Name != got.Key || bundle.Description != "Turn a design into code" {
+		t.Fatalf("plugin bundle = %#v", bundle)
+	}
+}
+
+func TestListRuntimeLocalSkills_ClaudeDisabledPluginIsHidden(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	installPath := writeTestClaudePlugin(t, home, "paper-desktop@paper", "paper-desktop", false)
+	writeTestLocalSkill(t, filepath.Join(installPath, "skills"), "design-to-code", map[string]string{
+		"SKILL.md": "---\nname: Design to code\n---\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("claude")
+	if err != nil || !supported {
+		t.Fatalf("supported=%v err=%v", supported, err)
+	}
+	if len(skills) != 0 {
+		t.Fatalf("disabled plugin skills should be hidden, got %#v", skills)
 	}
 }
 
@@ -119,10 +299,40 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 			wantName: "Kimi Review",
 		},
 		{
+			provider: "reasonix",
+			root:     filepath.Join(".reasonix", "skills"),
+			wantPath: "~/.reasonix/skills/review-helper",
+			wantName: "Reasonix Review",
+		},
+		{
+			provider: "dsh",
+			root:     filepath.Join(".dsh", "skills"),
+			wantPath: "~/.dsh/skills/review-helper",
+			wantName: "DSH Review",
+		},
+		{
 			provider: "qoder",
 			root:     filepath.Join(".qoder", "skills"),
 			wantPath: "~/.qoder/skills/review-helper",
 			wantName: "Qoder Review",
+		},
+		{
+			provider: "qoderclicn",
+			root:     filepath.Join(".qoder-cn", "skills"),
+			wantPath: "~/.qoder-cn/skills/review-helper",
+			wantName: "Qoder CN Review",
+		},
+		{
+			provider: "qwen",
+			root:     filepath.Join(".qwen", "skills"),
+			wantPath: "~/.qwen/skills/review-helper",
+			wantName: "Qwen Review",
+		},
+		{
+			provider: "grok",
+			root:     filepath.Join(".grok", "skills"),
+			wantPath: "~/.grok/skills/review-helper",
+			wantName: "Grok Review",
 		},
 	}
 
@@ -130,6 +340,18 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 		t.Run(tc.provider, func(t *testing.T) {
 			home := t.TempDir()
 			t.Setenv("HOME", home)
+			if tc.provider == "grok" {
+				t.Setenv("GROK_HOME", "")
+			}
+			if tc.provider == "qwen" {
+				t.Setenv("QWEN_HOME", "")
+			}
+			if tc.provider == "reasonix" {
+				t.Setenv("REASONIX_HOME", "")
+			}
+			if tc.provider == "dsh" {
+				t.Setenv("DSH_HOME", "")
+			}
 
 			writeTestLocalSkill(t, filepath.Join(home, tc.root), "review-helper", map[string]string{
 				"SKILL.md": "---\nname: " + tc.wantName + "\ndescription: Review code\n---\n# Review\n",
@@ -176,6 +398,76 @@ func TestLocalSkills_DiscoversACPProviderRoots(t *testing.T) {
 				t.Fatalf("expected 1 supporting file, got %d", len(bundle.Files))
 			}
 		})
+	}
+}
+
+func TestListRuntimeLocalSkills_GrokUsesGROKHOME(t *testing.T) {
+	home := t.TempDir()
+	grokHome := filepath.Join(t.TempDir(), "custom-grok-home")
+	t.Setenv("HOME", home)
+	t.Setenv("GROK_HOME", grokHome)
+	writeTestLocalSkill(t, filepath.Join(grokHome, "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: Grok Home Review\ndescription: Review code\n---\n# Review\n",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".grok", "skills"), "wrong-home", map[string]string{
+		"SKILL.md": "---\nname: Wrong Home\n---\n# Wrong\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("grok")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("grok should be supported")
+	}
+	if len(skills) != 1 || skills[0].Key != "review-helper" {
+		t.Fatalf("expected only GROK_HOME skill, got %+v", skills)
+	}
+	if skills[0].SourcePath != filepath.ToSlash(filepath.Join(grokHome, "skills", "review-helper")) {
+		t.Fatalf("source_path = %q, want custom GROK_HOME path", skills[0].SourcePath)
+	}
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("grok", "review-helper")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if !supported || bundle == nil || bundle.Name != "Grok Home Review" {
+		t.Fatalf("unexpected bundle: supported=%v bundle=%+v", supported, bundle)
+	}
+}
+
+func TestListRuntimeLocalSkills_QwenUsesQWENHOME(t *testing.T) {
+	home := t.TempDir()
+	qwenHome := filepath.Join(t.TempDir(), "custom-qwen-home")
+	t.Setenv("HOME", home)
+	t.Setenv("QWEN_HOME", qwenHome)
+	writeTestLocalSkill(t, filepath.Join(qwenHome, "skills"), "review-helper", map[string]string{
+		"SKILL.md": "---\nname: Qwen Home Review\ndescription: Review code\n---\n# Review\n",
+	})
+	writeTestLocalSkill(t, filepath.Join(home, ".qwen", "skills"), "wrong-home", map[string]string{
+		"SKILL.md": "---\nname: Wrong Home\n---\n# Wrong\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("qwen")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported {
+		t.Fatal("qwen should be supported")
+	}
+	if len(skills) != 1 || skills[0].Key != "review-helper" {
+		t.Fatalf("expected only QWEN_HOME skill, got %+v", skills)
+	}
+	if skills[0].SourcePath != filepath.ToSlash(filepath.Join(qwenHome, "skills", "review-helper")) {
+		t.Fatalf("source_path = %q, want custom QWEN_HOME path", skills[0].SourcePath)
+	}
+
+	bundle, supported, err := loadRuntimeLocalSkillBundle("qwen", "review-helper")
+	if err != nil {
+		t.Fatalf("loadRuntimeLocalSkillBundle: %v", err)
+	}
+	if !supported || bundle == nil || bundle.Name != "Qwen Home Review" {
+		t.Fatalf("unexpected bundle: supported=%v bundle=%+v", supported, bundle)
 	}
 }
 
@@ -805,5 +1097,224 @@ func TestLoadRuntimeLocalSkillBundle_ProviderNonDirFallsThrough(t *testing.T) {
 	}
 	if bundle.Name != "Filish" || bundle.SourcePath != "~/.agents/skills/filish" {
 		t.Fatalf("bundle = %+v, want universal Filish", bundle)
+	}
+
+}
+
+// invalidUTF8Docx is a .docx prefix (PK zip magic) followed by bytes that are
+// not valid UTF-8. Carrying this through SkillFileData.Content is exactly the
+// corruption in #7143: encoding/json rewrites each invalid byte to U+FFFD, so
+// the file written back into the task environment no longer opens.
+const invalidUTF8Docx = "PK\x03\x04\x14\x00\x06\x00\xff\xfe\x80\x81payload"
+
+func TestCollectLocalSkillFiles_SkipsBinarySupportingFiles(t *testing.T) {
+	root := t.TempDir()
+	skillDir := writeTestLocalSkill(t, root, "docs", map[string]string{
+		"SKILL.md":               "---\nname: docs\n---\nbody\n",
+		"references/notes.md":    "# notes\n",
+		"references/report.docx": invalidUTF8Docx,
+		"assets/logo.png":        "\x89PNG\r\n\x1a\n\x00\x00\x00",
+	})
+
+	files, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles: %v", err)
+	}
+
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, f.Path)
+	}
+	want := []string{"references/notes.md"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("collected paths = %v, want %v", paths, want)
+	}
+
+	// The text file that survives must survive byte-for-byte.
+	if files[0].Content != "# notes\n" {
+		t.Errorf("text content = %q, want %q", files[0].Content, "# notes\n")
+	}
+}
+
+func TestCollectLocalSkillFiles_BinarySkipIsConsistentAcrossPasses(t *testing.T) {
+	// Discovery reports the bundle with includeContent=false and sync uploads
+	// it with includeContent=true. If only one pass skipped binary files the
+	// two would disagree on what the bundle contains. This must hold both for
+	// a listed binary extension and for one caught only by the content-level
+	// UTF-8 check — the discovery pass has to actually read the file to make
+	// the same call the sync pass makes.
+	root := t.TempDir()
+	skillDir := writeTestLocalSkill(t, root, "docs", map[string]string{
+		"SKILL.md":                  "---\nname: docs\n---\nbody\n",
+		"references/notes.md":       "# notes\n",
+		"references/report.docx":    invalidUTF8Docx,
+		"weights/model.safetensors": invalidUTF8Bytes,
+	})
+
+	listed, err := collectLocalSkillFiles(skillDir, false)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles(includeContent=false): %v", err)
+	}
+	synced, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles(includeContent=true): %v", err)
+	}
+
+	listedPaths := make([]string, 0, len(listed))
+	for _, f := range listed {
+		listedPaths = append(listedPaths, f.Path)
+	}
+	syncedPaths := make([]string, 0, len(synced))
+	for _, f := range synced {
+		syncedPaths = append(syncedPaths, f.Path)
+	}
+	if !reflect.DeepEqual(listedPaths, syncedPaths) {
+		t.Fatalf("discovery pass = %v, sync pass = %v; passes must agree", listedPaths, syncedPaths)
+	}
+	want := []string{"references/notes.md"}
+	if !reflect.DeepEqual(listedPaths, want) {
+		t.Fatalf("collected paths = %v, want %v", listedPaths, want)
+	}
+}
+
+// invalidUTF8Bytes carries no listed binary extension's magic — it exists to
+// prove the content-level check, not the extension list, is what catches it.
+const invalidUTF8Bytes = "\xff\xfe\x00\x01payload\x80\x81"
+
+// Bohan-J's review on #7175: the extension blacklist alone doesn't close the
+// root cause. A binary file with an unlisted extension must still be caught
+// by the content-level utf8.Valid check.
+func TestCollectLocalSkillFiles_SkipsUnlistedBinaryExtension(t *testing.T) {
+	root := t.TempDir()
+	skillDir := writeTestLocalSkill(t, root, "docs", map[string]string{
+		"SKILL.md":                  "---\nname: docs\n---\nbody\n",
+		"references/notes.md":       "# notes\n",
+		"weights/model.safetensors": invalidUTF8Bytes,
+		"data/table.parquet":        invalidUTF8Bytes,
+		"blob.bin":                  invalidUTF8Bytes,
+	})
+
+	files, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles: %v", err)
+	}
+
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, f.Path)
+	}
+	want := []string{"references/notes.md"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("collected paths = %v, want %v — an unlisted binary extension must still be caught by the content check", paths, want)
+	}
+}
+
+// A binary file with no extension at all must be caught the same way.
+func TestCollectLocalSkillFiles_SkipsInvalidUTF8WithNoExtension(t *testing.T) {
+	root := t.TempDir()
+	skillDir := writeTestLocalSkill(t, root, "docs", map[string]string{
+		"SKILL.md":            "---\nname: docs\n---\nbody\n",
+		"references/notes.md": "# notes\n",
+		"references/README":   invalidUTF8Bytes,
+	})
+
+	files, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles: %v", err)
+	}
+
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, f.Path)
+	}
+	want := []string{"references/notes.md"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("collected paths = %v, want %v — a no-extension binary file must still be caught by the content check", paths, want)
+	}
+}
+
+// validUTF8WithNUL is UTF-16LE encoding of "Hello": every byte is a valid
+// single-byte UTF-8 sequence (printable ASCII or NUL), so utf8.Valid alone
+// would accept it — multica-eve's review on #7175 flagged this as a
+// realistic byte-integrity hole: the server-side import path
+// (server/internal/handler/skill_create.go's sanitizeNullBytes) strips every
+// 0x00, so a file like this still comes back different from what went in.
+const validUTF8WithNUL = "H\x00e\x00l\x00l\x00o\x00"
+
+// A file with an unlisted extension that is valid UTF-8 but contains an
+// embedded NUL must still be caught — utf8.Valid alone is not sufficient.
+func TestCollectLocalSkillFiles_SkipsUnlistedExtensionWithEmbeddedNUL(t *testing.T) {
+	root := t.TempDir()
+	skillDir := writeTestLocalSkill(t, root, "docs", map[string]string{
+		"SKILL.md":            "---\nname: docs\n---\nbody\n",
+		"references/notes.md": "# notes\n",
+		"weights/model.dat":   validUTF8WithNUL,
+	})
+
+	files, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles: %v", err)
+	}
+
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, f.Path)
+	}
+	want := []string{"references/notes.md"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("collected paths = %v, want %v — valid UTF-8 with an embedded NUL must still be caught", paths, want)
+	}
+}
+
+// A no-extension file with the same valid-UTF-8-but-NUL-containing content
+// must be caught the same way.
+func TestCollectLocalSkillFiles_SkipsNoExtensionWithEmbeddedNUL(t *testing.T) {
+	root := t.TempDir()
+	skillDir := writeTestLocalSkill(t, root, "docs", map[string]string{
+		"SKILL.md":             "---\nname: docs\n---\nbody\n",
+		"references/notes.md":  "# notes\n",
+		"references/UTF16NAME": validUTF8WithNUL,
+	})
+
+	files, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles: %v", err)
+	}
+
+	paths := make([]string, 0, len(files))
+	for _, f := range files {
+		paths = append(paths, f.Path)
+	}
+	want := []string{"references/notes.md"}
+	if !reflect.DeepEqual(paths, want) {
+		t.Fatalf("collected paths = %v, want %v — a no-extension file with an embedded NUL must still be caught", paths, want)
+	}
+}
+
+// A valid-UTF-8 text file — including one with an extension the blacklist
+// doesn't recognize, and one with no extension at all — must still pass
+// through untouched. The content check must not over-trigger on ordinary
+// text.
+func TestCollectLocalSkillFiles_ValidUTF8TextPassesThroughUntouched(t *testing.T) {
+	root := t.TempDir()
+	body := "# Notes\n\nContém acentos e emoji 🎉 — não é binário.\n"
+	skillDir := writeTestLocalSkill(t, root, "docs", map[string]string{
+		"SKILL.md":  "---\nname: docs\n---\nbody\n",
+		"notes.txt": body,
+		"data.csv":  "a,b,c\n1,2,3\n",
+		"config":    "key=value\n",
+	})
+
+	files, err := collectLocalSkillFiles(skillDir, true)
+	if err != nil {
+		t.Fatalf("collectLocalSkillFiles: %v", err)
+	}
+	if len(files) != 3 {
+		t.Fatalf("expected all 3 valid-UTF-8 supporting files to pass through, got %d: %+v", len(files), files)
+	}
+	for _, f := range files {
+		if f.Path == "notes.txt" && f.Content != body {
+			t.Errorf("notes.txt content = %q, want %q", f.Content, body)
+		}
 	}
 }

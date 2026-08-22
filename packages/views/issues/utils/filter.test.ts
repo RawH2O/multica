@@ -1,9 +1,11 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import type { Issue, IssueAssigneeGroup } from "@multica/core/types";
 import {
   applyIssueFilters,
   filterAssigneeGroups,
   filterIssues,
+  NO_PROPERTY_VALUE,
   type IssueFilters,
 } from "./filter";
 
@@ -39,6 +41,7 @@ function makeIssue(overrides: Partial<Issue> = {}): Issue {
     start_date: null,
     due_date: null,
     metadata: {},
+    properties: {},
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
     ...overrides,
@@ -90,6 +93,14 @@ describe("filterIssues", () => {
       includeNoAssignee: true,
     });
     expect(result.map((i) => i.id)).toEqual(["2", "3"]);
+  });
+
+  it("treats an explicitly active empty assignee predicate as match-none", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      assigneeFilterActive: true,
+    });
+    expect(result).toEqual([]);
   });
 
   it("hides assigned issues when only 'No assignee' is selected", () => {
@@ -381,5 +392,100 @@ describe("filterAssigneeGroups", () => {
       runningIssueIds: new Set(["C"]),
     });
     expect(result).toEqual([]);
+  });
+});
+
+describe("property filters", () => {
+  const sevId = "prop-severity";
+  const platId = "prop-platforms";
+  const doneId = "prop-done";
+  const critical = makeIssue({ id: "P1", properties: { [sevId]: "opt-critical" } });
+  const minor = makeIssue({ id: "P2", properties: { [sevId]: "opt-minor", [platId]: ["opt-ios", "opt-web"] } });
+  const unset = makeIssue({ id: "P3" });
+  const checked = makeIssue({ id: "P4", properties: { [doneId]: true } });
+
+  it("select values match by option id (OR within the definition)", () => {
+    const result = filterIssues([critical, minor, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: ["opt-critical", "opt-minor"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1", "P2"]);
+  });
+
+  it("issues without a value never match a filtered definition", () => {
+    const result = filterIssues([critical, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: ["opt-critical"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1"]);
+  });
+
+  it("multi_select matches on intersection", () => {
+    const result = filterIssues([critical, minor], {
+      ...NO_FILTER,
+      propertyFilters: { [platId]: ["opt-web"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P2"]);
+  });
+
+  it("checkbox values match the true/false pseudo-options", () => {
+    const result = filterIssues([checked, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [doneId]: ["true"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P4"]);
+  });
+
+  it("no-value matches issues where the property is unset", () => {
+    // P1/P2/P3 have no `doneId` at all; P4 has it set to true.
+    const result = filterIssues([critical, minor, unset, checked], {
+      ...NO_FILTER,
+      propertyFilters: { [doneId]: [NO_PROPERTY_VALUE] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1", "P2", "P3"]);
+  });
+
+  it("no-value ORs with a value within the definition", () => {
+    const result = filterIssues([critical, minor, unset, checked], {
+      ...NO_FILTER,
+      propertyFilters: { [doneId]: ["true", NO_PROPERTY_VALUE] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1", "P2", "P3", "P4"]);
+  });
+
+  it("no-value ANDs across definitions", () => {
+    // Only P2 carries `sevId=opt-minor` and leaves `doneId` unset.
+    const result = filterIssues([critical, minor, unset, checked], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: ["opt-minor"], [doneId]: [NO_PROPERTY_VALUE] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P2"]);
+  });
+
+  it("ANDs across definitions", () => {
+    const result = filterIssues([critical, minor], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: ["opt-minor"], [platId]: ["opt-ios"] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P2"]);
+  });
+
+  it("empty selections are inert", () => {
+    const result = filterIssues([critical, minor, unset], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: [] },
+    });
+    expect(result).toHaveLength(3);
+  });
+
+  it("filterAssigneeGroups applies property filters per group", () => {
+    const groups: IssueAssigneeGroup[] = [
+      { id: "assignee:member:u-1", assignee_type: "member", assignee_id: "u-1", issues: [critical, minor], total: 2 },
+    ];
+    const result = filterAssigneeGroups(groups, {
+      propertyFilters: { [sevId]: ["opt-critical"] },
+    });
+    expect(result?.[0]?.issues.map((i) => i.id)).toEqual(["P1"]);
+    expect(result?.[0]?.total).toBe(1);
   });
 });

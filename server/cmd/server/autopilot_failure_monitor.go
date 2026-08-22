@@ -14,8 +14,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -147,6 +149,17 @@ func tickAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, bus *
 			continue
 		}
 
+		// A system auto-pause is a substantive status change (MUL-4302 §3.4).
+		// Record it as a rule-version publish with a 'system' publisher (no member
+		// actor). Best-effort: the monitor is a background sweep, a paused autopilot
+		// does not dispatch (so this version is never the active version at a real
+		// run — a later member resume would supersede it), and a failed write must
+		// not abort the sweep.
+		if verr := service.RecordAutopilotRuleVersion(ctx, queries, paused, "system", pgtype.UUID{}); verr != nil {
+			slog.Warn("autopilot failure monitor: record rule version failed",
+				"autopilot_id", util.UUIDToString(paused.ID), "error", verr)
+		}
+
 		failPct := 100.0
 		if c.TotalRuns > 0 {
 			failPct = math.Round(float64(c.FailedRuns)/float64(c.TotalRuns)*1000) / 10 // one decimal place
@@ -233,6 +246,7 @@ func emitAutopilotPausedNotifications(
 		emitted[key] = true
 
 		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   autopilot.WorkspaceID,
 			RecipientType: r.Type,
 			RecipientID:   r.ID,

@@ -15,6 +15,7 @@ import { pinListOptions } from "@multica/core/pins";
 import { useCreatePin, useDeletePin } from "@multica/core/pins";
 import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssuesScope } from "@multica/core/issues/stores";
 import { useRecentContextStore } from "@multica/core/chat";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -25,6 +26,8 @@ import { useNavigation } from "../../navigation";
 import { TitleEditor, ContentEditor, type ContentEditorRef } from "../../editor";
 import { PriorityIcon } from "../../issues/components/priority-icon";
 import { ProjectResourcesSection } from "./project-resources-section";
+import { ProjectStartDatePicker } from "./project-start-date-picker";
+import { ProjectDueDatePicker } from "./project-due-date-picker";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
@@ -83,8 +86,8 @@ function PropRow({
 }) {
   return (
     <div className="flex min-h-8 items-center gap-2 rounded-md px-2 -mx-2 hover:bg-accent/50 transition-colors">
-      <span className="w-16 shrink-0 text-xs text-muted-foreground">{label}</span>
-      <div className="flex min-w-0 flex-1 items-center gap-1.5 text-xs truncate">
+      <span className="w-16 shrink-0 text-caption text-muted-foreground">{label}</span>
+      <div className="flex min-w-0 flex-1 items-center gap-1.5 text-caption truncate">
         {children}
       </div>
     </div>
@@ -117,9 +120,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       });
     }
   }, [project?.id, project?.title, project?.description, project?.icon, project?.status, recordRecentContext, wsId]);
+  const issueTab = useIssuesScope(`project:${projectId}`);
   const issueScope = useMemo(
-    () => ({ type: "project" as const, projectId }),
-    [projectId],
+    () => ({ type: "project" as const, projectId, actorKind: issueTab }),
+    [projectId, issueTab],
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
@@ -243,7 +247,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             render={
               <button
                 type="button"
-                className="text-2xl cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
+                className="text-display-sm cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
                 title={t(($) => $.detail.icon_tooltip)}
               >
                 {project.icon || "📁"}
@@ -263,7 +267,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           key={`title-${projectId}`}
           defaultValue={project.title}
           placeholder={t(($) => $.detail.title_placeholder)}
-          className="mt-2 w-full text-base font-semibold leading-snug tracking-tight"
+          className="mt-2 w-full text-title-sm font-semibold leading-snug tracking-tight"
           onBlur={(value) => {
             const trimmed = value.trim();
             if (trimmed && trimmed !== project.title) handleUpdateField({ title: trimmed });
@@ -275,7 +279,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       <div>
         <button
           type="button"
-          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${propertiesOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setPropertiesOpen(!propertiesOpen)}
         >
           {t(($) => $.detail.section_properties)}
@@ -286,7 +290,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
-                  <button type="button" className="inline-flex items-center gap-1.5 text-xs hover:text-foreground transition-colors">
+                  <button type="button" className="inline-flex items-center gap-1.5 text-caption hover:text-foreground transition-colors">
                     <span className={cn("size-2 rounded-full", statusCfg.dotColor)} />
                     <span>{statusLabels[project.status]}</span>
                   </button>
@@ -307,7 +311,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
-                  <button type="button" className="inline-flex items-center gap-1.5 text-xs hover:text-foreground transition-colors">
+                  <button type="button" className="inline-flex items-center gap-1.5 text-caption hover:text-foreground transition-colors">
                     <PriorityIcon priority={project.priority} />
                     <span>{priorityLabels[project.priority]}</span>
                   </button>
@@ -328,10 +332,10 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
             <Popover open={leadOpen} onOpenChange={(v) => { setLeadOpen(v); if (!v) setLeadFilter(""); }}>
               <PopoverTrigger
                 render={
-                  <button type="button" className="inline-flex items-center gap-1.5 text-xs hover:text-foreground transition-colors">
+                  <button type="button" className="inline-flex items-center gap-1.5 text-caption hover:text-foreground transition-colors">
                     {project.lead_type && project.lead_id ? (
                       <>
-                        <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size={16} enableHoverCard showStatusDot />
+                        <ActorAvatar actorType={project.lead_type} actorId={project.lead_id} size="sm" enableHoverCard showStatusDot />
                         <span className="cursor-pointer">{getActorName(project.lead_type, project.lead_id)}</span>
                       </>
                     ) : (
@@ -347,29 +351,29 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                     value={leadFilter}
                     onChange={(e) => setLeadFilter(e.target.value)}
                     placeholder={t(($) => $.lead.assign_placeholder)}
-                    className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+                    className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
                   />
                 </div>
                 <div className="p-1 max-h-60 overflow-y-auto">
                   <button
                     type="button"
                     onClick={() => { handleUpdateField({ lead_type: null, lead_id: null }); setLeadOpen(false); }}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
                   >
                     <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
                     <span className="text-muted-foreground">{t(($) => $.lead.no_lead)}</span>
                   </button>
                   {filteredMembers.length > 0 && (
                     <>
-                      <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">{t(($) => $.lead.members_group)}</div>
+                      <div className="px-2 pt-2 pb-1 text-caption font-medium text-muted-foreground uppercase tracking-wider">{t(($) => $.lead.members_group)}</div>
                       {filteredMembers.map((m) => (
                         <button
                           type="button"
                           key={m.user_id}
                           onClick={() => { handleUpdateField({ lead_type: "member", lead_id: m.user_id }); setLeadOpen(false); }}
-                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
                         >
-                          <ActorAvatar actorType="member" actorId={m.user_id} size={16} />
+                          <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
                           <span>{m.name}</span>
                         </button>
                       ))}
@@ -377,26 +381,32 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   )}
                   {filteredAgents.length > 0 && (
                     <>
-                      <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">{t(($) => $.lead.agents_group)}</div>
+                      <div className="px-2 pt-2 pb-1 text-caption font-medium text-muted-foreground uppercase tracking-wider">{t(($) => $.lead.agents_group)}</div>
                       {filteredAgents.map((a) => (
                         <button
                           type="button"
                           key={a.id}
                           onClick={() => { handleUpdateField({ lead_type: "agent", lead_id: a.id }); setLeadOpen(false); }}
-                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
                         >
-                          <ActorAvatar actorType="agent" actorId={a.id} size={16} showStatusDot />
+                          <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
                           <span>{a.name}</span>
                         </button>
                       ))}
                     </>
                   )}
                   {filteredMembers.length === 0 && filteredAgents.length === 0 && leadFilter && (
-                    <div className="px-2 py-3 text-center text-sm text-muted-foreground">{t(($) => $.lead.no_results)}</div>
+                    <div className="px-2 py-3 text-center text-body text-muted-foreground">{t(($) => $.lead.no_results)}</div>
                   )}
                 </div>
               </PopoverContent>
             </Popover>
+          </PropRow>
+          <PropRow label={t(($) => $.detail.prop_start_date)}>
+            <ProjectStartDatePicker startDate={project.start_date} onUpdate={handleUpdateField} />
+          </PropRow>
+          <PropRow label={t(($) => $.detail.prop_due_date)}>
+            <ProjectDueDatePicker dueDate={project.due_date} onUpdate={handleUpdateField} />
           </PropRow>
         </div>}
       </div>
@@ -408,7 +418,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <div>
             <button
               type="button"
-              className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${progressOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+              className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${progressOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
               onClick={() => setProgressOpen(!progressOpen)}
             >
               {t(($) => $.detail.section_progress)}
@@ -421,7 +431,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
                   style={{ width: `${pct}%` }}
                 />
               </div>
-              <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+              <span className="text-caption text-muted-foreground tabular-nums shrink-0">
                 {issueMetrics.completedCount}/{issueMetrics.totalCount}
               </span>
             </div>}
@@ -433,7 +443,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       <div>
         <button
           type="button"
-          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${descriptionOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${descriptionOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
           onClick={() => setDescriptionOpen(!descriptionOpen)}
         >
           {t(($) => $.detail.section_description)}
@@ -443,12 +453,12 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           <ContentEditor
             ref={descEditorRef}
             key={projectId}
-            defaultValue={project.description || ""}
+            value={project.description || ""}
             placeholder={t(($) => $.detail.description_placeholder)}
             onUpdate={(md) => handleUpdateField({ description: md || null })}
             debounceMs={1500}
           />
-          <p className="mt-1 px-2 text-xs text-muted-foreground">
+          <p className="mt-1 px-2 text-caption text-muted-foreground">
             {t(($) => $.detail.description_hint)}
           </p>
         </div>}
@@ -536,7 +546,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
 
           <IssueSurface
             scope={issueScope}
-            modes={["board", "list", "swimlane", "gantt"]}
+            modes={["board", "list", "table", "swimlane", "gantt"]}
           />
           </div>
         </ResizablePanel>

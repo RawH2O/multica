@@ -50,7 +50,11 @@ func (q *Queries) ArchiveAllReadInbox(ctx context.Context, arg ArchiveAllReadInb
 const archiveCompletedInbox = `-- name: ArchiveCompletedInbox :execrows
 UPDATE inbox_item i SET archived = true
 WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2 AND i.archived = false
-  AND i.issue_id IN (SELECT id FROM issue WHERE status IN ('done', 'cancelled'))
+  AND i.issue_id IN (
+    SELECT id FROM issue
+    WHERE workspace_id = $1
+      AND issue_effective_status(workspace_id, status) IN ('done', 'cancelled')
+  )
 `
 
 type ArchiveCompletedInboxParams struct {
@@ -230,8 +234,8 @@ const createInboxItem = `-- name: CreateInboxItem :one
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
     type, severity, issue_id, title, body,
-    actor_type, actor_id, details
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    actor_type, actor_id, details, id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::uuid, gen_random_uuid()))
 RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
 `
 
@@ -247,6 +251,7 @@ type CreateInboxItemParams struct {
 	ActorType     pgtype.Text `json:"actor_type"`
 	ActorID       pgtype.UUID `json:"actor_id"`
 	Details       []byte      `json:"details"`
+	ID            pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams) (InboxItem, error) {
@@ -262,6 +267,7 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 		arg.ActorType,
 		arg.ActorID,
 		arg.Details,
+		arg.ID,
 	)
 	var i InboxItem
 	err := row.Scan(
@@ -343,6 +349,102 @@ func (q *Queries) GetInboxItemInWorkspace(ctx context.Context, arg GetInboxItemI
 		&i.Details,
 	)
 	return i, err
+}
+
+const listArchivedInboxItems = `-- name: ListArchivedInboxItems :many
+SELECT i.id, i.workspace_id, i.recipient_type, i.recipient_id, i.type, i.severity, i.issue_id, i.title, i.body, i.read, i.archived, i.created_at, i.actor_type, i.actor_id, i.details,
+       iss.status as issue_status
+FROM inbox_item i
+LEFT JOIN issue iss ON iss.id = i.issue_id
+WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3 AND i.archived = true
+  AND (i.issue_id IS NULL OR NOT EXISTS (
+      SELECT 1
+      FROM inbox_item active
+      WHERE active.workspace_id = i.workspace_id
+        AND active.recipient_type = i.recipient_type
+        AND active.recipient_id = i.recipient_id
+        AND active.issue_id = i.issue_id
+        AND active.archived = false
+  ))
+ORDER BY i.created_at DESC
+LIMIT 200
+`
+
+type ListArchivedInboxItemsParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+}
+
+type ListArchivedInboxItemsRow struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	RecipientType string             `json:"recipient_type"`
+	RecipientID   pgtype.UUID        `json:"recipient_id"`
+	Type          string             `json:"type"`
+	Severity      string             `json:"severity"`
+	IssueID       pgtype.UUID        `json:"issue_id"`
+	Title         string             `json:"title"`
+	Body          pgtype.Text        `json:"body"`
+	Read          bool               `json:"read"`
+	Archived      bool               `json:"archived"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	ActorType     pgtype.Text        `json:"actor_type"`
+	ActorID       pgtype.UUID        `json:"actor_id"`
+	Details       []byte             `json:"details"`
+	IssueStatus   pgtype.Text        `json:"issue_status"`
+}
+
+// Archived counterpart of ListInboxItems, backing the inbox's "Archived"
+// sub-view (MUL-3736).
+//
+// An issue whose group still has an active row is excluded: archiving is
+// issue-level, so a NEW notification on an already-archived issue leaves the
+// old archived rows in place alongside the fresh active one. The issue belongs
+// in the main inbox at that point, and the two lists must stay mutually
+// exclusive per issue group — otherwise the same issue renders in both. The
+// exclusion lives here rather than in the client so neither list depends on
+// the other's cache being loaded. Items without an issue_id group on their own
+// id and can never have an active sibling, hence the IS NULL short-circuit.
+//
+// LIMIT bounds the response while the archive grows without end (v1 ships no
+// pagination). Rows are newest-first, so truncation drops the OLDEST rows and
+// can never hide a group's newest row — the one the deduplicated UI renders.
+func (q *Queries) ListArchivedInboxItems(ctx context.Context, arg ListArchivedInboxItemsParams) ([]ListArchivedInboxItemsRow, error) {
+	rows, err := q.db.Query(ctx, listArchivedInboxItems, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListArchivedInboxItemsRow{}
+	for rows.Next() {
+		var i ListArchivedInboxItemsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RecipientType,
+			&i.RecipientID,
+			&i.Type,
+			&i.Severity,
+			&i.IssueID,
+			&i.Title,
+			&i.Body,
+			&i.Read,
+			&i.Archived,
+			&i.CreatedAt,
+			&i.ActorType,
+			&i.ActorID,
+			&i.Details,
+			&i.IssueStatus,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listInboxItems = `-- name: ListInboxItems :many
@@ -442,6 +544,101 @@ RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_
 
 func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
 	row := q.db.QueryRow(ctx, markInboxRead, id)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+	)
+	return i, err
+}
+
+const markInboxUnread = `-- name: MarkInboxUnread :one
+UPDATE inbox_item SET read = false
+WHERE id = $1
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
+`
+
+// Exact inverse of MarkInboxRead, and item-level for the same reason it is:
+// the inbox renders one row per issue carrying that group's NEWEST item, and
+// the group's read state is that item's read state. Flipping the whole group
+// unread would resurrect older siblings the user already dealt with and
+// inflate CountUnreadInbox (which counts raw rows), while changing nothing the
+// UI shows.
+func (q *Queries) MarkInboxUnread(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, markInboxUnread, id)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+	)
+	return i, err
+}
+
+const unarchiveInboxByIssue = `-- name: UnarchiveInboxByIssue :execrows
+UPDATE inbox_item SET archived = false
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = true
+`
+
+type UnarchiveInboxByIssueParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+}
+
+// Issue-level restore, mirroring ArchiveInboxByIssue: archiving one item
+// archives every sibling for the same issue, so unarchiving must bring the
+// whole group back. Leaves `read` untouched for the same reason as above.
+func (q *Queries) UnarchiveInboxByIssue(ctx context.Context, arg UnarchiveInboxByIssueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, unarchiveInboxByIssue,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.IssueID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const unarchiveInboxItem = `-- name: UnarchiveInboxItem :one
+UPDATE inbox_item SET archived = false
+WHERE id = $1
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
+`
+
+// Deliberately does not touch `read`: unarchiving restores an item to the main
+// inbox in the exact read/unread state it was archived in, so restoring an
+// unread item legitimately raises the unread badge again (MUL-3736).
+func (q *Queries) UnarchiveInboxItem(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, unarchiveInboxItem, id)
 	var i InboxItem
 	err := row.Scan(
 		&i.ID,

@@ -5,22 +5,34 @@ import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { AppLink } from "../../navigation";
-import type { Issue, Project } from "@multica/core/types";
+import type { Issue, Project,
+  IssueProperty,
+} from "@multica/core/types";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { PropertyIcon } from "../../common/property-icon";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useQuery } from "@tanstack/react-query";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
+import { useWorkspaceId } from "@multica/core/hooks";
+import { propertyListOptions } from "@multica/core/properties";
+import { CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
+import { CustomStatusChip } from "./custom-status-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
+import { useT } from "../../i18n";
 
 export interface ChildProgress {
   done: number;
   total: number;
+  visibleDone?: number;
+  visibleTotal?: number;
+  hiddenTotal?: number;
 }
 
 function formatDate(date: string): string {
@@ -46,11 +58,18 @@ function ListRowContent({
   containerProps?: Record<string, unknown>;
   checkboxProps?: Pick<React.HTMLAttributes<HTMLDivElement>, "onClick" | "onMouseDown" | "onPointerDown">;
 }) {
+  const { t } = useT("issues");
   const selection = useIssueSurfaceSelection();
   const selected = selection.selectedIds.has(issue.id);
   const toggle = selection.toggle;
   const p = useWorkspacePaths();
   const storeProperties = useViewStore((s) => s.cardProperties);
+  const cardPropertyIds = useViewStore((s) => s.cardPropertyIds);
+  const rowWsId = useWorkspaceId();
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(rowWsId));
+  const cardCustomProperties = cardPropertyIds
+    .map((id) => workspaceProperties.find((p) => p.id === id))
+    .filter((p): p is IssueProperty => !!p && issue.properties?.[p.id] !== undefined);
   const labels = issue.labels ?? [];
 
   const showProject = storeProperties.project && project;
@@ -66,8 +85,10 @@ function ListRowContent({
         ref={containerRef}
         style={containerStyle}
         {...containerProps}
-        className={`group/row flex h-9 items-center gap-2 px-4 text-sm transition-colors hover:not-data-[popup-open]:bg-accent/60 data-[popup-open]:bg-accent ${
-          selected ? "bg-accent/30" : ""
+        className={`group/row flex h-9 items-center gap-2 px-4 text-body transition-colors ${
+          selected
+            ? "bg-surface-selected hover:not-data-[popup-open]:bg-surface-selected data-[popup-open]:bg-surface-selected"
+            : "hover:not-data-[popup-open]:bg-surface-hover data-[popup-open]:bg-surface-hover"
         } ${isDragging ? "opacity-30" : ""}`}
       >
         <div
@@ -89,21 +110,30 @@ function ListRowContent({
         </div>
         <AppLink
           href={p.issueDetail(issue.id)}
+          newTabTitle={issue.identifier}
           className={`flex flex-1 items-center gap-2 min-w-0 ${isDragging ? "pointer-events-none" : ""}`}
         >
-          <span className="w-16 shrink-0 text-xs text-muted-foreground">
+          <span className="w-16 shrink-0 text-caption text-muted-foreground">
             {issue.identifier}
           </span>
           <IssueAgentActivityIndicator issueId={issue.id} />
 
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span className="truncate">{issue.title}</span>
+            {/* List sections are categories, so a custom status needs to name
+                itself on the row. Silent for built-ins. (MUL-6243) */}
+            <CustomStatusChip status={issue.status} className="shrink-0" />
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
                 <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
-                <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+                <span className="text-micro text-muted-foreground tabular-nums font-medium">
                   {childProgress!.done}/{childProgress!.total}
                 </span>
+                {(childProgress!.hiddenTotal ?? 0) > 0 && (
+                  <span className="text-micro text-warning tabular-nums font-medium">
+                    {t(($) => $.card.child_progress_restricted, { count: childProgress!.hiddenTotal ?? 0 })}
+                  </span>
+                )}
               </span>
             )}
             {showLabels && (
@@ -112,26 +142,39 @@ function ListRowContent({
                   <LabelChip key={label.id} label={label} />
                 ))}
                 {labels.length > 3 && (
-                  <span className="text-[11px] text-muted-foreground">
+                  <span className="text-micro text-muted-foreground">
                     +{labels.length - 3}
                   </span>
                 )}
               </span>
             )}
+            {cardCustomProperties.length > 0 && (
+              <span className="ml-1.5 hidden md:inline-flex shrink-0 items-center gap-1 max-w-[260px] overflow-hidden">
+                {cardCustomProperties.slice(0, 3).map((property) => (
+                  <span
+                    key={property.id}
+                    className="inline-flex max-w-[120px] items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-micro text-muted-foreground"
+                  >
+                    <PropertyIcon property={property} className="size-3 text-micro" />
+                    <CustomPropertyValueDisplay property={property} value={issue.properties?.[property.id]} />
+                  </span>
+                ))}
+              </span>
+            )}
           </span>
           {showProject && (
-            <span className="inline-flex shrink-0 items-center gap-1 text-xs text-muted-foreground max-w-[140px]">
+            <span className="inline-flex shrink-0 items-center gap-1 text-caption text-muted-foreground max-w-[140px]">
               <ProjectIcon project={project} size="sm" />
               <span className="truncate">{project!.title}</span>
             </span>
           )}
           {showStartDate && (
-            <span className="shrink-0 text-xs text-muted-foreground">
+            <span className="shrink-0 text-caption text-muted-foreground">
               {formatDate(issue.start_date!)}
             </span>
           )}
           {showDueDate && (
-            <span className="shrink-0 text-xs text-muted-foreground">
+            <span className="shrink-0 text-caption text-muted-foreground">
               {formatDate(issue.due_date!)}
             </span>
           )}
@@ -139,7 +182,7 @@ function ListRowContent({
             <ActorAvatar
               actorType={issue.assignee_type!}
               actorId={issue.assignee_id!}
-              size={20}
+              size="sm"
               enableHoverCard
             />
           )}

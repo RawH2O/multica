@@ -5,12 +5,19 @@ import {
 } from "@dnd-kit/core";
 import type { Issue, IssueAssigneeType, IssueStatus, UpdateIssueRequest } from "@multica/core/types";
 import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
+import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
+import { issueColumnCategory } from "@multica/core/issues";
 import type { BoardColumnGroup } from "../components/board-column";
 
-export type DragMoveUpdates = Pick<
+export type DragMoveTargetUpdates = Pick<
   UpdateIssueRequest,
-  "status" | "assignee_type" | "assignee_id" | "position"
+  "status" | "assignee_type" | "assignee_id" | "project_id" | "position"
 >;
+
+export type DragMoveUpdates = DragMoveTargetUpdates & {
+  before_id: string | null;
+  after_id: string | null;
+};
 
 const UNASSIGNED_GROUP_ID = "assignee:unassigned";
 
@@ -30,6 +37,10 @@ export function statusGroupId(status: IssueStatus): string {
   return `status:${status}`;
 }
 
+export function propertyGroupId(propertyId: string, optionId: string | null): string {
+  return `property:${propertyId}:${optionId ?? "none"}`;
+}
+
 export function assigneeGroupId(
   type: IssueAssigneeType | null,
   id: string | null,
@@ -37,8 +48,36 @@ export function assigneeGroupId(
   return type && id ? `assignee:${type}:${id}` : UNASSIGNED_GROUP_ID;
 }
 
-export function getIssueGroupId(issue: Issue, grouping: IssueGrouping): string {
-  if (grouping === "status") return statusGroupId(issue.status);
+/** Mirrors the server's project group key (`project:<id>` / `project:none`)
+ *  so a column built from a descriptor and one built from a card agree. */
+export function projectGroupId(projectId: string | null): string {
+  return `project:${projectId ?? "none"}`;
+}
+
+export function getIssueGroupId(
+  issue: Issue,
+  grouping: IssueGrouping,
+  knownOptionIds?: ReadonlySet<string>,
+): string {
+  // Status columns are CATEGORIES, so the card buckets by the category it
+  // behaves as. Bucketing by the raw key gave a custom status a column id no
+  // column has, and the card was dropped from the board/list entirely
+  // (MUL-6409).
+  if (grouping === "status") return statusGroupId(issueColumnCategory(issue));
+  if (grouping === "project") return projectGroupId(issue.project_id ?? null);
+  const propertyId = propertyIdFromViewKey(grouping);
+  if (propertyId) {
+    const value = issue.properties?.[propertyId];
+    let optionId = typeof value === "string" ? value : null;
+    // A value referencing an option no longer in the definition (removed
+    // before the in-use guard existed, or by a newer server) must bucket
+    // into the No-value column — an unmatched column id would silently drop
+    // the issue from the board.
+    if (optionId !== null && knownOptionIds && !knownOptionIds.has(optionId)) {
+      optionId = null;
+    }
+    return propertyGroupId(propertyId, optionId);
+  }
   return assigneeGroupId(issue.assignee_type, issue.assignee_id);
 }
 
@@ -46,11 +85,12 @@ export function buildColumns(
   issues: Issue[],
   groups: BoardColumnGroup[],
   grouping: IssueGrouping,
+  knownOptionIds?: ReadonlySet<string>,
 ): Record<string, string[]> {
   const cols: Record<string, string[]> = {};
   for (const group of groups) cols[group.id] = [];
   for (const issue of issues) {
-    const gid = getIssueGroupId(issue, grouping);
+    const gid = getIssueGroupId(issue, grouping, knownOptionIds);
     if (cols[gid]) cols[gid].push(issue.id);
   }
   return cols;
@@ -64,6 +104,17 @@ export function computePosition(ids: string[], activeId: string, issueMap: Map<s
   if (idx === 0) return getPos(ids[1]!) - 1;
   if (idx === ids.length - 1) return getPos(ids[idx - 1]!) + 1;
   return (getPos(ids[idx - 1]!) + getPos(ids[idx + 1]!)) / 2;
+}
+
+export function getMoveAnchors(
+  ids: readonly string[],
+  activeId: string,
+): Pick<DragMoveUpdates, "before_id" | "after_id"> {
+  const index = ids.indexOf(activeId);
+  return {
+    before_id: index > 0 ? ids[index - 1]! : null,
+    after_id: index >= 0 && index < ids.length - 1 ? ids[index + 1]! : null,
+  };
 }
 
 /**
@@ -100,7 +151,18 @@ export function findColumn(
 }
 
 export function issueMatchesGroup(issue: Issue, group: BoardColumnGroup): boolean {
-  if (group.status) return issue.status === group.status;
+  // "Is this card already in that column?" — a category question, like the
+  // column itself. Comparing the raw key answered no for every custom status,
+  // so a drop that changed nothing still fired a status write (MUL-6409).
+  if (group.status) return issueColumnCategory(issue) === group.status;
+  if (group.propertyId !== undefined) {
+    const value = issue.properties?.[group.propertyId];
+    const optionId = typeof value === "string" ? value : null;
+    return optionId === (group.propertyOptionId ?? null);
+  }
+  if (group.projectId !== undefined) {
+    return (issue.project_id ?? null) === group.projectId;
+  }
   return (
     (issue.assignee_type ?? null) === (group.assigneeType ?? null) &&
     (issue.assignee_id ?? null) === (group.assigneeId ?? null)
@@ -110,8 +172,27 @@ export function issueMatchesGroup(issue: Issue, group: BoardColumnGroup): boolea
 export function getMoveUpdates(
   group: BoardColumnGroup,
   position: number,
-): DragMoveUpdates {
-  if (group.status) return { status: group.status, position };
+  /** The card being moved, when the caller has it. A status column names a
+   *  CATEGORY, and a card on a custom status is already in that column under a
+   *  DIFFERENT key — so writing the column's canonical key would silently
+   *  rewrite `awaiting_response` to `in_review`, and a status change starts an
+   *  agent run, for a drag that only changed the row order (MUL-6409). */
+  issue?: Pick<Issue, "status" | "status_category">,
+): DragMoveTargetUpdates {
+  if (group.status) {
+    const keepsStatus =
+      issue !== undefined &&
+      issue.status !== group.status &&
+      issueColumnCategory(issue) === group.status;
+    if (keepsStatus) return { position };
+    return { status: group.status, position };
+  }
+  // Property columns: the value change is not part of UpdateIssueRequest —
+  // the board applies it through useSetIssueProperty after the position move.
+  if (group.propertyId !== undefined) return { position };
+  if (group.projectId !== undefined) {
+    return { project_id: group.projectId, position };
+  }
   return {
     assignee_type: group.assigneeType ?? null,
     assignee_id: group.assigneeId ?? null,
