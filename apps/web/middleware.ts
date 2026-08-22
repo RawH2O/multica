@@ -30,9 +30,9 @@ function resolveLocale(req: NextRequest): string {
   });
 }
 
-// Forward the resolved locale to RSC layouts via the `x-multica-locale`
-// request header. layout.tsx reads it through `await headers()`. The
-// `request: { headers }` form is what makes the header land on the upstream
+// Forward the resolved locale to RSC layouts via the x-multica-locale
+// request header. layout.tsx reads it through await headers(). The
+// request: { headers } form is what makes the header land on the upstream
 // request — without it the value would only sit on the response.
 function nextWithLocale(req: NextRequest): NextResponse {
   const headers = new Headers(req.headers);
@@ -40,11 +40,10 @@ function nextWithLocale(req: NextRequest): NextResponse {
   return NextResponse.next({ request: { headers } });
 }
 
-// Next.js 16 renamed `middleware` → `proxy`. API surface (NextRequest /
-// NextResponse / cookies / matcher) is identical; the only behavioral
-// change is the runtime — proxy is forced to nodejs and cannot opt into
-// edge.
-export function proxy(req: NextRequest) {
+// Keep this as Edge Middleware rather than Next.js 16's proxy.ts. OpenNext
+// Cloudflare supports Edge Middleware, but does not yet support Node.js
+// Middleware, which is the runtime enforced by proxy.ts.
+export function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const hasSession = req.cookies.has("multica_logged_in");
   const lastSlug = req.cookies.get("last_workspace_slug")?.value;

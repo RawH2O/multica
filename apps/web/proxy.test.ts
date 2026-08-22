@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
-import { proxy } from "./proxy";
+import { middleware } from "./middleware";
 
 function makeRequest(path: string, cookies: Record<string, string> = {}) {
   const cookieHeader = Object.entries(cookies)
@@ -13,7 +13,7 @@ function makeRequest(path: string, cookies: Record<string, string> = {}) {
 }
 
 function redirectLocation(path: string, cookies: Record<string, string> = {}) {
-  return proxy(makeRequest(path, cookies)).headers.get("location");
+  return middleware(makeRequest(path, cookies)).headers.get("location");
 }
 
 describe("proxy legacy workspace route redirects", () => {
