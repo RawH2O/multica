@@ -480,6 +480,44 @@ multica login
 multica daemon start
 ```
 
+## Cloudflare Workers Frontend (OpenNext)
+
+The Next.js frontend can run on Cloudflare Workers through the OpenNext
+adapter while the backend remains on the Dokploy host. The adapter files live
+under `apps/web`, so the repository's other workspace builds are unaffected.
+
+Use Node.js 22 or newer for the OpenNext toolchain.
+
+Install dependencies from the repository root, then configure the frontend's
+build-time environment variables:
+
+```bash
+pnpm install --frozen-lockfile
+export REMOTE_API_URL=https://api.example.com
+export NEXT_PUBLIC_API_URL=https://api.example.com
+export NEXT_PUBLIC_WS_URL=wss://api.example.com/ws
+```
+
+Run a Workers-runtime preview locally:
+
+```bash
+pnpm --filter @multica/web preview
+```
+
+Deploy from the repository root with Wrangler authentication already
+configured:
+
+```bash
+pnpm --filter @multica/web deploy
+```
+
+For Workers Builds, use the repository root for dependency installation and
+run `pnpm --filter @multica/web deploy` as the deploy command. Set the three
+frontend variables above as build variables; `NEXT_PUBLIC_*` values are
+embedded during the Next.js build. Keep backend secrets such as `DATABASE_URL`
+and `JWT_SECRET` on Dokploy. Update the backend's
+`FRONTEND_ORIGIN`/`CORS_ALLOWED_ORIGINS` values to the final Workers hostname.
+
 ## Advanced Configuration
 
 For environment variables, manual setup (without Docker), reverse proxy configuration, database setup, and more, see the [Advanced Configuration Guide](SELF_HOSTING_ADVANCED.md).
