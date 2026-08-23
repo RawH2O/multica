@@ -487,52 +487,6 @@ func (q *Queries) UpsertVCSCommitStatus(ctx context.Context, arg UpsertVCSCommit
 	return err
 }
 
-const upsertVCSCommitStatusOnFailure = `-- name: UpsertVCSCommitStatusOnFailure :execrows
-INSERT INTO vcs_commit_status (
-    connection_id, sha, context, state, target_url, description, updated_at
-) VALUES (
-    $1, $2, $3, $4, $6, $7, $5
-)
-ON CONFLICT (connection_id, sha, context) DO UPDATE SET
-    state       = EXCLUDED.state,
-    target_url  = EXCLUDED.target_url,
-    description = EXCLUDED.description,
-    updated_at  = EXCLUDED.updated_at
-WHERE EXCLUDED.updated_at >= vcs_commit_status.updated_at
-  AND vcs_commit_status.state <> 'failed'
-`
-
-type UpsertVCSCommitStatusOnFailureParams struct {
-	ConnectionID pgtype.UUID        `json:"connection_id"`
-	Sha          string             `json:"sha"`
-	Context      string             `json:"context"`
-	State        string             `json:"state"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	TargetUrl    pgtype.Text        `json:"target_url"`
-	Description  pgtype.Text        `json:"description"`
-}
-
-// The failure webhook is also the trigger edge for the agent reminder. Only
-// accept a failed event when the stored status is not already failed; this
-// makes provider retries and concurrent deliveries idempotent without adding a
-// second status table or notification state column. Non-failure events keep
-// using UpsertVCSCommitStatus so their metadata continues to refresh normally.
-func (q *Queries) UpsertVCSCommitStatusOnFailure(ctx context.Context, arg UpsertVCSCommitStatusOnFailureParams) (int64, error) {
-	result, err := q.db.Exec(ctx, upsertVCSCommitStatusOnFailure,
-		arg.ConnectionID,
-		arg.Sha,
-		arg.Context,
-		arg.State,
-		arg.UpdatedAt,
-		arg.TargetUrl,
-		arg.Description,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const upsertVCSConnection = `-- name: UpsertVCSConnection :one
 INSERT INTO vcs_connection (
     workspace_id, provider, instance_url, account_login,

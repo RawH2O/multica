@@ -182,25 +182,6 @@ ON CONFLICT (connection_id, sha, context) DO UPDATE SET
     updated_at  = EXCLUDED.updated_at
 WHERE EXCLUDED.updated_at >= vcs_commit_status.updated_at;
 
--- name: UpsertVCSCommitStatusOnFailure :execrows
--- The failure webhook is also the trigger edge for the agent reminder. Only
--- accept a failed event when the stored status is not already failed; this
--- makes provider retries and concurrent deliveries idempotent without adding a
--- second status table or notification state column. Non-failure events keep
--- using UpsertVCSCommitStatus so their metadata continues to refresh normally.
-INSERT INTO vcs_commit_status (
-    connection_id, sha, context, state, target_url, description, updated_at
-) VALUES (
-    $1, $2, $3, $4, sqlc.narg('target_url'), sqlc.narg('description'), $5
-)
-ON CONFLICT (connection_id, sha, context) DO UPDATE SET
-    state       = EXCLUDED.state,
-    target_url  = EXCLUDED.target_url,
-    description = EXCLUDED.description,
-    updated_at  = EXCLUDED.updated_at
-WHERE EXCLUDED.updated_at >= vcs_commit_status.updated_at
-  AND vcs_commit_status.state <> 'failed';
-
 -- name: GetFailedVCSCommitStatus :one
 -- Used by the MR webhook as the order-independent replay path: a pipeline may
 -- have stored failure before the MR row moved to this head SHA.
