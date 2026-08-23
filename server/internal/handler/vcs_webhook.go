@@ -3,9 +3,12 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -13,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/vcs"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -276,6 +280,14 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		}
 	}
 
+	// A GitLab pipeline webhook can arrive before the MR webhook that moves
+	// this row to the new head SHA. Replay a failure already stored for the
+	// current head after the MR link is in place, so webhook ordering cannot
+	// lose the agent reminder.
+	if conn.Provider == string(vcs.KindGitLab) && pr.HeadSha != "" {
+		h.replayVCSCIFailureForHead(ctx, conn, pr.HeadSha)
+	}
+
 	h.publish(protocol.EventPullRequestUpdated, workspaceID, "system", "", map[string]any{
 		"pull_request":     resp,
 		"linked_issue_ids": linkedIssueIDs,
@@ -290,7 +302,7 @@ func (h *Handler) mirrorVCSCIStatus(ctx context.Context, conn db.VcsConnection, 
 	// monotonic guard has something real to compare — writing time.Now() here
 	// made the guard always true, so an out-of-order redelivery could regress a
 	// status. Falls back to now() only when the payload carried no timestamp.
-	if err := h.Queries.UpsertVCSCommitStatus(ctx, db.UpsertVCSCommitStatusParams{
+	statusParams := db.UpsertVCSCommitStatusParams{
 		ConnectionID: conn.ID,
 		Sha:          ev.SHA,
 		Context:      ev.Context,
@@ -298,7 +310,25 @@ func (h *Handler) mirrorVCSCIStatus(ctx context.Context, conn db.VcsConnection, 
 		TargetUrl:    ptrToText(strPtrOrNil(ev.TargetURL)),
 		Description:  ptrToText(strPtrOrNil(ev.Description)),
 		UpdatedAt:    parseGHTimeRequired(ev.UpdatedAt),
-	}); err != nil {
+	}
+	if ev.State == "failed" && conn.Provider == string(vcs.KindGitLab) {
+		rows, err := h.Queries.UpsertVCSCommitStatusOnFailure(ctx, db.UpsertVCSCommitStatusOnFailureParams{
+			ConnectionID: conn.ID,
+			Sha:          ev.SHA,
+			Context:      ev.Context,
+			State:        ev.State,
+			UpdatedAt:    statusParams.UpdatedAt,
+			TargetUrl:    statusParams.TargetUrl,
+			Description:  statusParams.Description,
+		})
+		if err != nil {
+			slog.Warn("vcs: upsert failed commit status failed", "err", err)
+			return
+		}
+		if rows > 0 {
+			h.replayVCSCIFailureForHead(ctx, conn, ev.SHA)
+		}
+	} else if err := h.Queries.UpsertVCSCommitStatus(ctx, statusParams); err != nil {
 		slog.Warn("vcs: upsert commit status failed", "err", err)
 		return
 	}
@@ -317,4 +347,150 @@ func (h *Handler) mirrorVCSCIStatus(ctx context.Context, conn db.VcsConnection, 
 			"issue_id": uuidToString(issueID),
 		})
 	}
+}
+
+// replayVCSCIFailureForHead is the shared notification path for both webhook
+// orderings. The CI path calls it after accepting a new failed state; the MR
+// path calls it after the current head SHA and issue link are persisted.
+func (h *Handler) replayVCSCIFailureForHead(ctx context.Context, conn db.VcsConnection, headSHA string) {
+	if conn.Provider != string(vcs.KindGitLab) || headSHA == "" {
+		return
+	}
+	status, err := h.Queries.GetFailedVCSCommitStatus(ctx, db.GetFailedVCSCommitStatusParams{
+		ConnectionID: conn.ID,
+		Sha:          headSHA,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("vcs: lookup failed status for agent reminder failed", "err", err)
+		}
+		return
+	}
+	issueIDs, err := h.Queries.ListActionableIssueIDsForVCSPRHead(ctx, db.ListActionableIssueIDsForVCSPRHeadParams{
+		ConnectionID: conn.ID,
+		HeadSha:      headSHA,
+	})
+	if err != nil {
+		slog.Warn("vcs: lookup issues for failed status reminder failed", "err", err)
+		return
+	}
+	for _, issueID := range issueIDs {
+		h.notifyVCSCIFailureIssue(ctx, conn, issueID, status)
+	}
+}
+
+// notifyVCSCIFailureIssue writes one durable system comment and explicitly
+// wakes the issue's agent/squad assignee. It locks the issue while checking a
+// deterministic marker, because the CI and MR replay paths can race with one
+// another. The generic comment listeners intentionally ignore system comments;
+// publishSystemIssueComment is therefore required after the transaction.
+func (h *Handler) notifyVCSCIFailureIssue(ctx context.Context, conn db.VcsConnection, issueID pgtype.UUID, status db.VcsCommitStatus) {
+	if h.TxStarter == nil {
+		slog.Warn("vcs: cannot notify agent about failed CI without transaction starter", "issue_id", uuidToString(issueID))
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		slog.Warn("vcs: begin failed CI reminder transaction failed", "err", err, "issue_id", uuidToString(issueID))
+		return
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	qtx := h.Queries.WithTx(tx)
+	issue, err := qtx.LockIssueForVCSFailureNotification(ctx, db.LockIssueForVCSFailureNotificationParams{
+		ID:          issueID,
+		WorkspaceID: conn.WorkspaceID,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Warn("vcs: lock issue for failed CI reminder failed", "err", err, "issue_id", uuidToString(issueID))
+		}
+		return
+	}
+	if !eligibleForVCSFailureReminder(ctx, qtx, issue) {
+		return
+	}
+
+	marker := vcsCIFailureMarker(conn.ID, status)
+	seen, err := qtx.HasVCSFailureNotificationComment(ctx, db.HasVCSFailureNotificationCommentParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		Marker:      marker,
+	})
+	if err != nil {
+		slog.Warn("vcs: check duplicate failed CI reminder failed", "err", err, "issue_id", uuidToString(issue.ID))
+		return
+	}
+	if seen {
+		return
+	}
+
+	content := vcsCIFailureCommentContent(h.buildParentAssigneeMention(ctx, issue), marker, status)
+	created, err := qtx.CreateComment(ctx, db.CreateCommentParams{
+		ID:          dbid.NewV7(),
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "system",
+		AuthorID:    pgtype.UUID{Valid: true},
+		Content:     content,
+		Type:        "system",
+		ParentID:    pgtype.UUID{Valid: false},
+	})
+	if err != nil {
+		slog.Warn("vcs: create failed CI reminder comment failed", "err", err, "issue_id", uuidToString(issue.ID))
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		slog.Warn("vcs: commit failed CI reminder failed", "err", err, "issue_id", uuidToString(issue.ID))
+		return
+	}
+	committed = true
+	h.publishSystemIssueComment(ctx, issue, created.Comment(), created.IssueRevision)
+}
+
+func eligibleForVCSFailureReminder(ctx context.Context, q issuestatus.Querier, issue db.Issue) bool {
+	status := issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status)
+	if status == "done" || status == "cancelled" || status == "backlog" {
+		return false
+	}
+	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
+		return false
+	}
+	return issue.AssigneeType.String == "agent" || issue.AssigneeType.String == "squad"
+}
+
+func vcsCIFailureMarker(connectionID pgtype.UUID, status db.VcsCommitStatus) string {
+	updatedAt := ""
+	if status.UpdatedAt.Valid {
+		updatedAt = status.UpdatedAt.Time.UTC().Format(time.RFC3339Nano)
+	}
+	return fmt.Sprintf("<!-- multica:vcs-ci-failure:%s:%s:%s:%s -->",
+		uuidToString(connectionID), status.Sha, status.Context, updatedAt)
+}
+
+func vcsCIFailureCommentContent(mention, marker string, status db.VcsCommitStatus) string {
+	sha := sanitizeVCSFailureCommentText(status.Sha)
+	contextName := sanitizeVCSFailureCommentText(status.Context)
+	content := fmt.Sprintf("%s%s\nCI failed for commit `%s` (%s).", marker, mention, sha, contextName)
+	if status.TargetUrl.Valid && strings.TrimSpace(status.TargetUrl.String) != "" {
+		content += fmt.Sprintf(" Pipeline: %s.", sanitizeVCSFailureCommentText(status.TargetUrl.String))
+	}
+	if status.Description.Valid && strings.TrimSpace(status.Description.String) != "" {
+		content += fmt.Sprintf(" %s", sanitizeVCSFailureCommentText(status.Description.String))
+	}
+	return content + " Please inspect the failure, fix the MR, and push a new commit."
+}
+
+func sanitizeVCSFailureCommentText(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.ReplaceAll(value, "`", "'")
+	value = strings.ReplaceAll(value, "\r", " ")
+	value = strings.ReplaceAll(value, "\n", " ")
+	return value
 }

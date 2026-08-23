@@ -421,6 +421,16 @@ WITH RECURSIVE root_of AS (
 SELECT c.* FROM comment c
 WHERE c.id = (SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1);
 
+-- name: HasVCSFailureNotificationComment :one
+SELECT EXISTS (
+    SELECT 1
+    FROM comment
+    WHERE issue_id = $1
+      AND workspace_id = $2
+      AND author_type = 'system'
+      AND strpos(content, sqlc.arg('marker')) > 0
+) AS found;
+
 -- name: CreateComment :one
 -- A new comment counts as activity on its issue, so the same statement bumps
 -- the parent issue's updated_at and last_activity_at. The touch is a leading data-modifying CTE and

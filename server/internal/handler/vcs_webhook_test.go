@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -439,6 +440,132 @@ func TestVCSWebhook_GitlabMergeRequest(t *testing.T) {
 	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
 	if updated.Status != "done" {
 		t.Errorf("expected issue done, got %q", updated.Status)
+	}
+}
+
+func fireGitLabPipelineWebhook(t *testing.T, connID, sha, status, finishedAt string) {
+	t.Helper()
+	raw, _ := json.Marshal(map[string]any{
+		"object_kind": "pipeline",
+		"object_attributes": map[string]any{
+			"sha": sha, "status": status,
+			"url":         "https://gitlab.test/acme/widget/-/pipelines/99",
+			"finished_at": finishedAt,
+		},
+	})
+	w := httptest.NewRecorder()
+	testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
+		"X-Gitlab-Event": "Pipeline Hook", "X-Gitlab-Token": vcsTestSecret,
+	}, raw))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("pipeline webhook: expected 202, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
+func fireGitLabMergeRequestWebhook(t *testing.T, connID, issueIdentifier, sha, updatedAt string) {
+	t.Helper()
+	raw, _ := json.Marshal(map[string]any{
+		"object_kind": "merge_request",
+		"user":        map[string]any{"username": "alice"},
+		"project":     map[string]any{"path_with_namespace": "acme/widget"},
+		"object_attributes": map[string]any{
+			"iid": 43, "title": "Fix " + issueIdentifier, "description": "",
+			"state": "opened", "action": "open", "source_branch": "feat",
+			"url":        "https://gitlab.test/acme/widget/-/merge_requests/43",
+			"created_at": "2026-08-23T00:00:00Z", "updated_at": updatedAt,
+			"last_commit": map[string]any{"id": sha},
+		},
+	})
+	w := httptest.NewRecorder()
+	testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
+		"X-Gitlab-Event": "Merge Request Hook", "X-Gitlab-Token": vcsTestSecret,
+	}, raw))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("merge request webhook: expected 202, got %d (%s)", w.Code, w.Body.String())
+	}
+}
+
+// TestVCSWebhook_GitlabCIFailureReplaysAfterMRUpdate covers the ordering where
+// GitLab reports a failed pipeline before its MR webhook advances head_sha. The
+// status is stored first; the later MR update links the issue and replays the
+// failure into one system comment and one agent task.
+func TestVCSWebhook_GitlabCIFailureReplaysAfterMRUpdate(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+	issue := newVCSIssue(t, "GitLab CI failure replay")
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent").Scan(&agentID); err != nil {
+		t.Fatalf("locate test agent: %v", err)
+	}
+	setIssueAssigneeDirect(t, issue.ID, "agent", agentID)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issue.ID)
+		cleanupVCS(ctx, issue.ID)
+	})
+
+	sha := "gitlab-failure-before-mr"
+	finishedAt := "2026-08-23T01:00:00Z"
+	fireGitLabPipelineWebhook(t, connID, sha, "failed", finishedAt)
+	if got := countSystemCommentsOn(t, issue.ID); got != 0 {
+		t.Fatalf("failure before MR link must not comment yet, got %d", got)
+	}
+
+	fireGitLabMergeRequestWebhook(t, connID, issue.Identifier, sha, "2026-08-23T01:01:00Z")
+	content := parentSystemCommentContent(t, issue.ID)
+	if !strings.Contains(content, "mention://agent/"+agentID) {
+		t.Fatalf("expected agent mention in CI failure comment, got: %s", content)
+	}
+	if !strings.Contains(content, sha) || !strings.Contains(content, "pipelines/99") {
+		t.Fatalf("expected SHA and pipeline URL in CI failure comment, got: %s", content)
+	}
+	if got := countSystemCommentsOn(t, issue.ID); got != 1 {
+		t.Fatalf("expected one replayed CI failure comment, got %d", got)
+	}
+	if got := countPendingTasksForAgent(t, issue.ID, agentID); got != 1 {
+		t.Fatalf("expected one pending agent task, got %d", got)
+	}
+
+	// MR webhook redelivery sees the failed status again, but the marker check
+	// must prevent a second durable reminder.
+	fireGitLabMergeRequestWebhook(t, connID, issue.Identifier, sha, "2026-08-23T01:01:00Z")
+	if got := countSystemCommentsOn(t, issue.ID); got != 1 {
+		t.Fatalf("MR redelivery must not duplicate CI failure comment, got %d", got)
+	}
+}
+
+// TestVCSWebhook_GitlabCIFailureNotifiesAfterMR verifies the normal ordering:
+// the MR is already linked when the failed pipeline webhook arrives. A retry
+// of the same failed pipeline is ignored by the transition guard.
+func TestVCSWebhook_GitlabCIFailureNotifiesAfterMR(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "gitlab", "https://gitlab.test")
+	issue := newVCSIssue(t, "GitLab CI failure direct")
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent").Scan(&agentID); err != nil {
+		t.Fatalf("locate test agent: %v", err)
+	}
+	setIssueAssigneeDirect(t, issue.ID, "agent", agentID)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issue.ID)
+		cleanupVCS(ctx, issue.ID)
+	})
+
+	sha := "gitlab-failure-after-mr"
+	fireGitLabMergeRequestWebhook(t, connID, issue.Identifier, sha, "2026-08-23T02:01:00Z")
+	fireGitLabPipelineWebhook(t, connID, sha, "failed", "2026-08-23T02:02:00Z")
+	fireGitLabPipelineWebhook(t, connID, sha, "failed", "2026-08-23T02:02:00Z")
+
+	if got := countSystemCommentsOn(t, issue.ID); got != 1 {
+		t.Fatalf("duplicate failed pipeline must produce one comment, got %d", got)
+	}
+	if got := countPendingTasksForAgent(t, issue.ID, agentID); got != 1 {
+		t.Fatalf("duplicate failed pipeline must produce one pending task, got %d", got)
 	}
 }
 
