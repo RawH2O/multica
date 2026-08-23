@@ -182,6 +182,33 @@ ON CONFLICT (connection_id, sha, context) DO UPDATE SET
     updated_at  = EXCLUDED.updated_at
 WHERE EXCLUDED.updated_at >= vcs_commit_status.updated_at;
 
+-- name: UpsertVCSCommitStatusOnFailure :execrows
+-- The failure webhook is also the trigger edge for the agent reminder. Only
+-- accept a failed event when the stored status is not already failed; this
+-- makes provider retries and concurrent deliveries idempotent without adding a
+-- second status table or notification state column. Non-failure events keep
+-- using UpsertVCSCommitStatus so their metadata continues to refresh normally.
+INSERT INTO vcs_commit_status (
+    connection_id, sha, context, state, target_url, description, updated_at
+) VALUES (
+    $1, $2, $3, $4, sqlc.narg('target_url'), sqlc.narg('description'), $5
+)
+ON CONFLICT (connection_id, sha, context) DO UPDATE SET
+    state       = EXCLUDED.state,
+    target_url  = EXCLUDED.target_url,
+    description = EXCLUDED.description,
+    updated_at  = EXCLUDED.updated_at
+WHERE EXCLUDED.updated_at >= vcs_commit_status.updated_at
+  AND vcs_commit_status.state <> 'failed';
+
+-- name: GetFailedVCSCommitStatus :one
+-- Used by the MR webhook as the order-independent replay path: a pipeline may
+-- have stored failure before the MR row moved to this head SHA.
+SELECT * FROM vcs_commit_status
+WHERE connection_id = $1 AND sha = $2 AND state = 'failed'
+ORDER BY updated_at DESC
+LIMIT 1;
+
 -- name: ListIssueIDsForVCSPRHead :many
 -- Issues linked to any PR whose head sha matches the given status, so a
 -- commit-status event can fan out a PR-card refresh to the right issues.
@@ -189,6 +216,17 @@ SELECT DISTINCT ipr.issue_id
 FROM vcs_pull_request pr
 JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
 WHERE pr.connection_id = $1 AND pr.head_sha = $2 AND pr.head_sha <> '';
+
+-- name: ListActionableIssueIDsForVCSPRHead :many
+-- Same SHA lookup for agent reminders. Bare body mentions are retained as
+-- reference-only history but must not wake an agent for a CI failure.
+SELECT DISTINCT ipr.issue_id
+FROM vcs_pull_request pr
+JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE pr.connection_id = $1
+  AND pr.head_sha = $2
+  AND pr.head_sha <> ''
+  AND NOT ipr.reference_only;
 
 -- =====================
 -- Issue ↔ VCS PR link

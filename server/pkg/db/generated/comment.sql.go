@@ -654,6 +654,30 @@ func (q *Queries) HasAgentRepliedInThread(ctx context.Context, arg HasAgentRepli
 	return has_replied, err
 }
 
+const hasVCSFailureNotificationComment = `-- name: HasVCSFailureNotificationComment :one
+SELECT EXISTS (
+    SELECT 1
+    FROM comment
+    WHERE issue_id = $1
+      AND workspace_id = $2
+      AND author_type = 'system'
+      AND strpos(content, $3) > 0
+) AS found
+`
+
+type HasVCSFailureNotificationCommentParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Marker      string      `json:"marker"`
+}
+
+func (q *Queries) HasVCSFailureNotificationComment(ctx context.Context, arg HasVCSFailureNotificationCommentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasVCSFailureNotificationComment, arg.IssueID, arg.WorkspaceID, arg.Marker)
+	var found bool
+	err := row.Scan(&found)
+	return found, err
+}
+
 const listChildCommentsForParents = `-- name: ListChildCommentsForParents :many
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision FROM comment
 WHERE parent_id = ANY($1::uuid[])

@@ -47,6 +47,35 @@ func (q *Queries) DeleteVCSConnection(ctx context.Context, arg DeleteVCSConnecti
 	return err
 }
 
+const getFailedVCSCommitStatus = `-- name: GetFailedVCSCommitStatus :one
+SELECT connection_id, sha, context, state, target_url, description, updated_at FROM vcs_commit_status
+WHERE connection_id = $1 AND sha = $2 AND state = 'failed'
+ORDER BY updated_at DESC
+LIMIT 1
+`
+
+type GetFailedVCSCommitStatusParams struct {
+	ConnectionID pgtype.UUID `json:"connection_id"`
+	Sha          string      `json:"sha"`
+}
+
+// Used by the MR webhook as the order-independent replay path: a pipeline may
+// have stored failure before the MR row moved to this head SHA.
+func (q *Queries) GetFailedVCSCommitStatus(ctx context.Context, arg GetFailedVCSCommitStatusParams) (VcsCommitStatus, error) {
+	row := q.db.QueryRow(ctx, getFailedVCSCommitStatus, arg.ConnectionID, arg.Sha)
+	var i VcsCommitStatus
+	err := row.Scan(
+		&i.ConnectionID,
+		&i.Sha,
+		&i.Context,
+		&i.State,
+		&i.TargetUrl,
+		&i.Description,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getIssueCombinedPullRequestCloseAggregate = `-- name: GetIssueCombinedPullRequestCloseAggregate :one
 WITH combined AS (
     SELECT pr.state AS state, ipr.close_intent AS close_intent
@@ -155,6 +184,43 @@ func (q *Queries) LinkIssueToVCSPullRequest(ctx context.Context, arg LinkIssueTo
 		arg.PreserveCloseIntent,
 	)
 	return err
+}
+
+const listActionableIssueIDsForVCSPRHead = `-- name: ListActionableIssueIDsForVCSPRHead :many
+SELECT DISTINCT ipr.issue_id
+FROM vcs_pull_request pr
+JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE pr.connection_id = $1
+  AND pr.head_sha = $2
+  AND pr.head_sha <> ''
+  AND NOT ipr.reference_only
+`
+
+type ListActionableIssueIDsForVCSPRHeadParams struct {
+	ConnectionID pgtype.UUID `json:"connection_id"`
+	HeadSha      string      `json:"head_sha"`
+}
+
+// Same SHA lookup for agent reminders. Bare body mentions are retained as
+// reference-only history but must not wake an agent for a CI failure.
+func (q *Queries) ListActionableIssueIDsForVCSPRHead(ctx context.Context, arg ListActionableIssueIDsForVCSPRHeadParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listActionableIssueIDsForVCSPRHead, arg.ConnectionID, arg.HeadSha)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var issue_id pgtype.UUID
+		if err := rows.Scan(&issue_id); err != nil {
+			return nil, err
+		}
+		items = append(items, issue_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listIssueIDsForVCSPRHead = `-- name: ListIssueIDsForVCSPRHead :many
@@ -419,6 +485,52 @@ func (q *Queries) UpsertVCSCommitStatus(ctx context.Context, arg UpsertVCSCommit
 		arg.Description,
 	)
 	return err
+}
+
+const upsertVCSCommitStatusOnFailure = `-- name: UpsertVCSCommitStatusOnFailure :execrows
+INSERT INTO vcs_commit_status (
+    connection_id, sha, context, state, target_url, description, updated_at
+) VALUES (
+    $1, $2, $3, $4, $6, $7, $5
+)
+ON CONFLICT (connection_id, sha, context) DO UPDATE SET
+    state       = EXCLUDED.state,
+    target_url  = EXCLUDED.target_url,
+    description = EXCLUDED.description,
+    updated_at  = EXCLUDED.updated_at
+WHERE EXCLUDED.updated_at >= vcs_commit_status.updated_at
+  AND vcs_commit_status.state <> 'failed'
+`
+
+type UpsertVCSCommitStatusOnFailureParams struct {
+	ConnectionID pgtype.UUID        `json:"connection_id"`
+	Sha          string             `json:"sha"`
+	Context      string             `json:"context"`
+	State        string             `json:"state"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	TargetUrl    pgtype.Text        `json:"target_url"`
+	Description  pgtype.Text        `json:"description"`
+}
+
+// The failure webhook is also the trigger edge for the agent reminder. Only
+// accept a failed event when the stored status is not already failed; this
+// makes provider retries and concurrent deliveries idempotent without adding a
+// second status table or notification state column. Non-failure events keep
+// using UpsertVCSCommitStatus so their metadata continues to refresh normally.
+func (q *Queries) UpsertVCSCommitStatusOnFailure(ctx context.Context, arg UpsertVCSCommitStatusOnFailureParams) (int64, error) {
+	result, err := q.db.Exec(ctx, upsertVCSCommitStatusOnFailure,
+		arg.ConnectionID,
+		arg.Sha,
+		arg.Context,
+		arg.State,
+		arg.UpdatedAt,
+		arg.TargetUrl,
+		arg.Description,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const upsertVCSConnection = `-- name: UpsertVCSConnection :one
