@@ -330,24 +330,23 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 			"parent_id", uuidToString(parent.ID))
 		return
 	}
-	comment := created.Comment()
+	h.publishSystemIssueComment(ctx, parent, created.Comment(), created.IssueRevision)
+}
 
-	h.publish(protocol.EventCommentCreated, uuidToString(parent.WorkspaceID), "system", "", map[string]any{
+// publishSystemIssueComment publishes a persisted platform comment and fires
+// the explicit assignee trigger. System comments intentionally bypass the
+// generic mention listeners, so callers that want an agent/squad wake must use
+// this helper after the comment has committed.
+func (h *Handler) publishSystemIssueComment(ctx context.Context, issue db.Issue, comment db.Comment, issueRevision int64) {
+	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
 		"comment":             commentToResponse(comment, nil, nil),
-		"issue_title":         parent.Title,
-		"issue_assignee_type": textToPtr(parent.AssigneeType),
-		"issue_assignee_id":   uuidToPtr(parent.AssigneeID),
-		"issue_status":        parent.Status,
-		"issue_revision":      created.IssueRevision,
+		"issue_title":         issue.Title,
+		"issue_assignee_type": textToPtr(issue.AssigneeType),
+		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
+		"issue_status":        issue.Status,
+		"issue_revision":      issueRevision,
 	})
-
-	// Dispatch the explicit trigger / inbox row for the parent assignee.
-	// Listener-level mention parsing is intentionally NOT involved (the
-	// notification + subscriber listeners both short-circuit on
-	// author_type='system'); this keeps smuggled mentions from the child
-	// title inert and gives the platform a single place to apply the loop
-	// and idempotency guards.
-	h.dispatchParentAssigneeTrigger(ctx, parent, comment)
+	h.dispatchParentAssigneeTrigger(ctx, issue, comment)
 }
 
 // isTerminalChildStatus reports whether a child issue status counts as

@@ -47,6 +47,35 @@ func (q *Queries) DeleteVCSConnection(ctx context.Context, arg DeleteVCSConnecti
 	return err
 }
 
+const getFailedVCSCommitStatus = `-- name: GetFailedVCSCommitStatus :one
+SELECT connection_id, sha, context, state, target_url, description, updated_at FROM vcs_commit_status
+WHERE connection_id = $1 AND sha = $2 AND state = 'failed'
+ORDER BY updated_at DESC
+LIMIT 1
+`
+
+type GetFailedVCSCommitStatusParams struct {
+	ConnectionID pgtype.UUID `json:"connection_id"`
+	Sha          string      `json:"sha"`
+}
+
+// Used by the MR webhook as the order-independent replay path: a pipeline may
+// have stored failure before the MR row moved to this head SHA.
+func (q *Queries) GetFailedVCSCommitStatus(ctx context.Context, arg GetFailedVCSCommitStatusParams) (VcsCommitStatus, error) {
+	row := q.db.QueryRow(ctx, getFailedVCSCommitStatus, arg.ConnectionID, arg.Sha)
+	var i VcsCommitStatus
+	err := row.Scan(
+		&i.ConnectionID,
+		&i.Sha,
+		&i.Context,
+		&i.State,
+		&i.TargetUrl,
+		&i.Description,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getIssueCombinedPullRequestCloseAggregate = `-- name: GetIssueCombinedPullRequestCloseAggregate :one
 WITH combined AS (
     SELECT pr.state AS state, ipr.close_intent AS close_intent
@@ -155,6 +184,43 @@ func (q *Queries) LinkIssueToVCSPullRequest(ctx context.Context, arg LinkIssueTo
 		arg.PreserveCloseIntent,
 	)
 	return err
+}
+
+const listActionableIssueIDsForVCSPRHead = `-- name: ListActionableIssueIDsForVCSPRHead :many
+SELECT DISTINCT ipr.issue_id
+FROM vcs_pull_request pr
+JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+WHERE pr.connection_id = $1
+  AND pr.head_sha = $2
+  AND pr.head_sha <> ''
+  AND NOT ipr.reference_only
+`
+
+type ListActionableIssueIDsForVCSPRHeadParams struct {
+	ConnectionID pgtype.UUID `json:"connection_id"`
+	HeadSha      string      `json:"head_sha"`
+}
+
+// Same SHA lookup for agent reminders. Bare body mentions are retained as
+// reference-only history but must not wake an agent for a CI failure.
+func (q *Queries) ListActionableIssueIDsForVCSPRHead(ctx context.Context, arg ListActionableIssueIDsForVCSPRHeadParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listActionableIssueIDsForVCSPRHead, arg.ConnectionID, arg.HeadSha)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var issue_id pgtype.UUID
+		if err := rows.Scan(&issue_id); err != nil {
+			return nil, err
+		}
+		items = append(items, issue_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listIssueIDsForVCSPRHead = `-- name: ListIssueIDsForVCSPRHead :many
