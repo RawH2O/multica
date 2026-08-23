@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -302,7 +301,7 @@ func (h *Handler) mirrorVCSCIStatus(ctx context.Context, conn db.VcsConnection, 
 	// monotonic guard has something real to compare — writing time.Now() here
 	// made the guard always true, so an out-of-order redelivery could regress a
 	// status. Falls back to now() only when the payload carried no timestamp.
-	statusParams := db.UpsertVCSCommitStatusParams{
+	if err := h.Queries.UpsertVCSCommitStatus(ctx, db.UpsertVCSCommitStatusParams{
 		ConnectionID: conn.ID,
 		Sha:          ev.SHA,
 		Context:      ev.Context,
@@ -310,27 +309,14 @@ func (h *Handler) mirrorVCSCIStatus(ctx context.Context, conn db.VcsConnection, 
 		TargetUrl:    ptrToText(strPtrOrNil(ev.TargetURL)),
 		Description:  ptrToText(strPtrOrNil(ev.Description)),
 		UpdatedAt:    parseGHTimeRequired(ev.UpdatedAt),
-	}
-	if ev.State == "failed" && conn.Provider == string(vcs.KindGitLab) {
-		rows, err := h.Queries.UpsertVCSCommitStatusOnFailure(ctx, db.UpsertVCSCommitStatusOnFailureParams{
-			ConnectionID: conn.ID,
-			Sha:          ev.SHA,
-			Context:      ev.Context,
-			State:        ev.State,
-			UpdatedAt:    statusParams.UpdatedAt,
-			TargetUrl:    statusParams.TargetUrl,
-			Description:  statusParams.Description,
-		})
-		if err != nil {
-			slog.Warn("vcs: upsert failed commit status failed", "err", err)
-			return
-		}
-		if rows > 0 {
-			h.replayVCSCIFailureForHead(ctx, conn, ev.SHA)
-		}
-	} else if err := h.Queries.UpsertVCSCommitStatus(ctx, statusParams); err != nil {
+	}); err != nil {
 		slog.Warn("vcs: upsert commit status failed", "err", err)
 		return
+	}
+	// Keep the existing status upsert semantics unchanged. The notification is
+	// an additive side effect after the platform accepts the failure event.
+	if ev.State == "failed" && conn.Provider == string(vcs.KindGitLab) {
+		h.replayVCSCIFailureForHead(ctx, conn, ev.SHA)
 	}
 
 	issueIDs, err := h.Queries.ListIssueIDsForVCSPRHead(ctx, db.ListIssueIDsForVCSPRHeadParams{
@@ -466,12 +452,8 @@ func eligibleForVCSFailureReminder(ctx context.Context, q issuestatus.Querier, i
 }
 
 func vcsCIFailureMarker(connectionID pgtype.UUID, status db.VcsCommitStatus) string {
-	updatedAt := ""
-	if status.UpdatedAt.Valid {
-		updatedAt = status.UpdatedAt.Time.UTC().Format(time.RFC3339Nano)
-	}
-	return fmt.Sprintf("<!-- multica:vcs-ci-failure:%s:%s:%s:%s -->",
-		uuidToString(connectionID), status.Sha, status.Context, updatedAt)
+	return fmt.Sprintf("<!-- multica:vcs-ci-failure:%s:%s:%s -->",
+		uuidToString(connectionID), status.Sha, status.Context)
 }
 
 func vcsCIFailureCommentContent(mention, marker string, status db.VcsCommitStatus) string {
