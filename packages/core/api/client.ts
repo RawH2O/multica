@@ -58,6 +58,11 @@ import type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
+  Hook,
+  HookSummary,
+  CreateHookRequest,
+  UpdateHookRequest,
+  SetAgentHooksRequest,
   SetAgentRuntimeSkillEnabledRequest,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
@@ -2949,6 +2954,47 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify(data),
     });
+  }
+
+  // Managed coding-agent hooks (Codex in v1).
+  async listHooks(): Promise<HookSummary[]> {
+    return this.fetch("/api/hooks");
+  }
+
+  async getHook(id: string): Promise<Hook> {
+    return this.fetch(`/api/hooks/${id}`);
+  }
+
+  async createHook(data: CreateHookRequest): Promise<Hook> {
+    return this.fetch("/api/hooks", { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async updateHook(id: string, data: UpdateHookRequest): Promise<Hook> {
+    return this.fetch(`/api/hooks/${id}`, { method: "PUT", body: JSON.stringify(data) });
+  }
+
+  async deleteHook(id: string): Promise<void> {
+    await this.fetch(`/api/hooks/${id}`, { method: "DELETE" });
+  }
+
+  async listAgentHooks(agentId: string): Promise<HookSummary[]> {
+    return this.fetch(`/api/agents/${agentId}/hooks`);
+  }
+
+  async setAgentHooks(agentId: string, data: SetAgentHooksRequest): Promise<void> {
+    await this.fetch(`/api/agents/${agentId}/hooks`, { method: "PUT", body: JSON.stringify(data) });
+  }
+
+  async addAgentHooks(agentId: string, data: SetAgentHooksRequest): Promise<void> {
+    await this.fetch(`/api/agents/${agentId}/hooks/add`, { method: "POST", body: JSON.stringify(data) });
+  }
+
+  async setAgentHookEnabled(agentId: string, hookId: string, enabled: boolean): Promise<void> {
+    await this.fetch(`/api/agents/${agentId}/hooks/${hookId}/enabled`, { method: "PUT", body: JSON.stringify({ enabled }) });
+  }
+
+  async removeAgentHook(agentId: string, hookId: string): Promise<void> {
+    await this.fetch(`/api/agents/${agentId}/hooks/${hookId}`, { method: "DELETE" });
   }
 
 	async setAgentSkillEnabled(agentId: string, skillId: string, enabled: boolean): Promise<void> {

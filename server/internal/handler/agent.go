@@ -112,6 +112,7 @@ type AgentResponse struct {
 	ComposioToolkitAllowlistRedacted bool                   `json:"composio_toolkit_allowlist_redacted,omitempty"`
 	OwnerID                          *string                `json:"owner_id"`
 	Skills                           []AgentSkillSummary    `json:"skills"`
+	Hooks                            []AgentHookSummary     `json:"hooks"`
 	DisabledRuntimeSkills            []DisabledRuntimeSkill `json:"disabled_runtime_skills"`
 	CreatedAt                        string                 `json:"created_at"`
 	UpdatedAt                        string                 `json:"updated_at"`
@@ -204,6 +205,7 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		ComposioToolkitAllowlist: composioAllowlist,
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
+		Hooks:                    []AgentHookSummary{},
 		DisabledRuntimeSkills:    decodeDisabledRuntimeSkills(a.DisabledRuntimeSkills),
 		CreatedAt:                timestampToString(a.CreatedAt),
 		UpdatedAt:                timestampToString(a.UpdatedAt),
@@ -704,6 +706,7 @@ type TaskAgentData struct {
 	Instructions          string                      `json:"instructions"`
 	Skills                []service.AgentSkillData    `json:"skills,omitempty"`
 	SkillRefs             []service.AgentSkillRefData `json:"skill_refs,omitempty"`
+	Hooks                 []service.AgentHookData     `json:"hooks,omitempty"`
 	CustomEnv             map[string]string           `json:"custom_env,omitempty"`
 	CustomArgs            []string                    `json:"custom_args,omitempty"`
 	McpConfig             json.RawMessage             `json:"mcp_config,omitempty"`
@@ -945,6 +948,21 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
 		return
 	}
+	hookRows, err := h.Queries.ListAgentHooksByWorkspace(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load agent hooks")
+		return
+	}
+	hookMap := map[string][]AgentHookSummary{}
+	for _, row := range hookRows {
+		agentID := uuidToString(row.AgentID)
+		hookMap[agentID] = append(hookMap[agentID], AgentHookSummary{
+			ID:          uuidToString(row.ID),
+			Name:        row.Name,
+			Description: row.Description,
+			Enabled:     row.Enabled,
+		})
+	}
 	skillMap := map[string][]AgentSkillSummary{}
 	for _, row := range skillRows {
 		agentID := uuidToString(row.AgentID)
@@ -992,6 +1010,9 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		applyInvocationTargetsToResponse(&resp, targets)
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
+		}
+		if hooks, ok := hookMap[resp.ID]; ok {
+			resp.Hooks = hooks
 		}
 		// Agent actors NEVER see mcp_config secrets, even when their host's
 		// PAT would normally satisfy the owner/admin role gate. Otherwise an
@@ -1047,6 +1068,10 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	// in #2174.
 	if err := h.attachAgentSkills(r.Context(), &resp, agent.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+		return
+	}
+	if err := h.attachAgentHooks(r.Context(), &resp, agent.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load agent hooks")
 		return
 	}
 
@@ -1370,6 +1395,9 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	resp := h.agentToResponse(created)
 	if err := h.attachAgentSkills(r.Context(), &resp, created.ID); err != nil {
 		slog.Warn("create agent: load skills for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
+	}
+	if err := h.attachAgentHooks(r.Context(), &resp, created.ID); err != nil {
+		slog.Warn("create agent: load hooks for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
 	}
 	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, created.ID); err != nil {
 		slog.Warn("create agent: load invocation targets for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
@@ -2026,6 +2054,11 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
 		return
 	}
+	if err := h.attachAgentHooks(r.Context(), &resp, updated.ID); err != nil {
+		slog.Warn("load agent hooks after update failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to load agent hooks")
+		return
+	}
 	slog.Info("agent updated", append(logger.RequestAttrs(r), "agent_id", id, "workspace_id", uuidToString(updated.WorkspaceID))...)
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(updated.WorkspaceID))
@@ -2065,6 +2098,30 @@ func (h *Handler) attachAgentSkills(ctx context.Context, resp *AgentResponse, ag
 		}
 	}
 	resp.Skills = out
+	return nil
+}
+
+// attachAgentHooks keeps Agent responses consistent after metadata mutations.
+// The independent `/api/agents/:id/hooks` endpoint remains the authoritative
+// detailed view, while this summary is used by list/detail projections.
+func (h *Handler) attachAgentHooks(ctx context.Context, resp *AgentResponse, agentID pgtype.UUID) error {
+	hooks, err := h.Queries.ListAgentHookSummaries(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	if len(hooks) == 0 {
+		return nil
+	}
+	out := make([]AgentHookSummary, len(hooks))
+	for i, hook := range hooks {
+		out[i] = AgentHookSummary{
+			ID:          uuidToString(hook.ID),
+			Name:        hook.Name,
+			Description: hook.Description,
+			Enabled:     hook.Enabled,
+		}
+	}
+	resp.Hooks = out
 	return nil
 }
 
@@ -2268,6 +2325,11 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
 		return
 	}
+	if err := h.attachAgentHooks(r.Context(), &resp, archived.ID); err != nil {
+		slog.Warn("load agent hooks after archive failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to load agent hooks")
+		return
+	}
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentArchived, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
@@ -2301,6 +2363,11 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	if err := h.attachAgentSkills(r.Context(), &resp, restored.ID); err != nil {
 		slog.Warn("load agent skills after restore failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+		return
+	}
+	if err := h.attachAgentHooks(r.Context(), &resp, restored.ID); err != nil {
+		slog.Warn("load agent hooks after restore failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+		writeError(w, http.StatusInternalServerError, "failed to load agent hooks")
 		return
 	}
 	userID := requestUserID(r)
