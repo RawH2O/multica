@@ -30,6 +30,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
+import { HooksTab } from "./tabs/hooks-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
@@ -50,6 +51,7 @@ export type DetailTab =
   | "work"
   | "instructions"
   | "skills"
+  | "hooks"
   | "mcp_config"
   | "composio_mcp"
   | "integrations"
@@ -64,6 +66,7 @@ type SecondaryTab = {
   labelKey:
     | "instructions"
     | "skills"
+    | "hooks"
     | "mcp_config"
     | "composio_mcp"
     | "integrations"
@@ -77,6 +80,7 @@ type SecondaryTab = {
 const CAPABILITY_TABS: SecondaryTab[] = [
   { id: "instructions", labelKey: "instructions" },
   { id: "skills", labelKey: "skills" },
+  { id: "hooks", labelKey: "hooks" },
   { id: "mcp_config", labelKey: "mcp_config" },
   { id: "composio_mcp", labelKey: "composio_mcp" },
   { id: "integrations", labelKey: "integrations" },
@@ -437,6 +441,9 @@ export function AgentOverviewPane({
                       currentUserId={currentUserId}
                       canEdit={canEdit}
                     />
+                  )}
+                  {effectiveView === "hooks" && (
+                    <HooksTab agent={agent} canEdit={canEdit} />
                   )}
                   {effectiveView === "mcp_config" && (
                     <McpConfigTab

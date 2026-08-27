@@ -259,6 +259,7 @@
     "tasks": "작업",
     "instructions": "지침",
     "skills": "스킬",
+    "hooks": "Hooks",
     "environment": "환경",
     "custom_args": "사용자 지정 인자",
     "mcp_config": "MCP",

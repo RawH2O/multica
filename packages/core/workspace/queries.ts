@@ -19,6 +19,7 @@ export const workspaceKeys = {
   squadMemberStatus: (wsId: string, squadId: string) =>
     ["workspaces", wsId, "squads", squadId, "members-status"] as const,
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
+  hooks: (wsId: string) => ["workspaces", wsId, "hooks"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
   mcpServers: (wsId: string) => ["workspaces", wsId, "mcp-servers"] as const,
 };
@@ -120,6 +121,22 @@ export function skillDetailOptions(wsId: string, skillId: string) {
     queryKey: [...workspaceKeys.skills(wsId), skillId] as const,
     queryFn: () => api.getSkill(skillId),
     enabled: !!skillId,
+  });
+}
+
+export function hookListOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workspaceKeys.hooks(wsId),
+    queryFn: () => api.listHooks(),
+    enabled: !!wsId,
+  });
+}
+
+export function agentHooksOptions(agentId: string) {
+  return queryOptions({
+    queryKey: ["agents", agentId, "hooks"] as const,
+    queryFn: () => api.listAgentHooks(agentId),
+    enabled: !!agentId,
   });
 }
 

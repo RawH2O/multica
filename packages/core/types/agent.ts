@@ -582,6 +582,8 @@ export interface Agent {
   service_tier?: string;
   owner_id: string | null;
   skills: AgentSkillSummary[];
+  /** Managed hooks assigned to this agent. Older backends omit this field. */
+  hooks?: AgentHookSummary[];
   /** Runtime-local skills this agent must not inherit. Older servers omit it. */
   disabled_runtime_skills?: DisabledRuntimeSkill[];
   created_at: string;
@@ -628,6 +630,14 @@ export interface AgentSkillSummary {
   description: string;
 	/** Older servers omit this field; consumers must treat that as enabled. */
 	enabled?: boolean;
+}
+
+/** Minimal hook shape embedded in an Agent payload. */
+export interface AgentHookSummary {
+  id: string;
+  name: string;
+  description: string;
+  enabled?: boolean;
 }
 
 export interface CreateAgentRequest {
@@ -886,6 +896,50 @@ export interface UpdateSkillRequest {
 
 export interface SetAgentSkillsRequest {
   skill_ids: string[];
+}
+
+// Managed coding-agent hooks. V1 is Codex-only; providers/events remain
+// explicit so the same workspace resource can later support Claude hooks.
+export interface HookSummary {
+  id: string;
+  workspace_id: string;
+  name: string;
+  description: string;
+  command: string;
+  providers: string[];
+  events: string[];
+  matcher: string;
+  config: Record<string, unknown>;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  enabled?: boolean;
+}
+
+export type Hook = HookSummary;
+
+export interface CreateHookRequest {
+  name: string;
+  description?: string;
+  command: string;
+  providers?: string[];
+  events: string[];
+  matcher?: string;
+  config?: Record<string, unknown>;
+}
+
+export interface UpdateHookRequest {
+  name?: string;
+  description?: string;
+  command?: string;
+  providers?: string[];
+  events?: string[];
+  matcher?: string;
+  config?: Record<string, unknown>;
+}
+
+export interface SetAgentHooksRequest {
+  hook_ids: string[];
 }
 
 export interface IssueUsageSummary {

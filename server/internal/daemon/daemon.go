@@ -6719,6 +6719,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentName:                        agentName,
 		AgentInstructions:                instructions,
 		AgentSkills:                      convertSkillsForEnv(skills),
+		AgentHooks:                       convertHooksForEnv(task.Agent),
 		DisabledRuntimeSkills:            convertDisabledRuntimeSkillsForEnv(task.Agent, task.RuntimeID, provider),
 		Repos:                            convertReposForEnv(task.Repos),
 		ProjectID:                        task.ProjectID,
@@ -8856,6 +8857,20 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 				Content: f.Content,
 			})
 		}
+	}
+	return result
+}
+
+func convertHooksForEnv(agentData *AgentData) []execenv.HookContextForEnv {
+	if agentData == nil || len(agentData.Hooks) == 0 {
+		return nil
+	}
+	result := make([]execenv.HookContextForEnv, 0, len(agentData.Hooks))
+	for _, hook := range agentData.Hooks {
+		result = append(result, execenv.HookContextForEnv{
+			Name: hook.Name, Command: hook.Command, Providers: append([]string(nil), hook.Providers...),
+			Events: append([]string(nil), hook.Events...), Matcher: hook.Matcher, Config: append([]byte(nil), hook.Config...),
+		})
 	}
 	return result
 }

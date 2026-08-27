@@ -155,6 +155,7 @@ type TaskContextForEnv struct {
 	AgentName                     string
 	AgentInstructions             string // agent identity/persona instructions, injected into CLAUDE.md
 	AgentSkills                   []SkillContextForEnv
+	AgentHooks                    []HookContextForEnv
 	DisabledRuntimeSkills         []RuntimeSkillRefForEnv
 	Repos                         []RepoContextForEnv     // workspace repos available for checkout
 	ProjectID                     string                  // active project for this task, when present
@@ -257,6 +258,18 @@ type SkillContextForEnv struct {
 	Description string
 	Content     string
 	Files       []SkillFileContextForEnv
+}
+
+// HookContextForEnv is a managed hook definition to materialize in the
+// provider's task-local configuration. Commands are intentionally strings:
+// the provider, not Multica, owns hook process execution.
+type HookContextForEnv struct {
+	Name      string
+	Command   string
+	Providers []string
+	Events    []string
+	Matcher   string
+	Config    []byte
 }
 
 // SkillFileContextForEnv represents a supporting file within a skill.
@@ -636,6 +649,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
 			return nil, fmt.Errorf("execenv: hydrate codex skills: %w", err)
 		}
+		if err := prepareCodexHooks(codexHome, params.Task.AgentHooks, logger); err != nil {
+			return nil, fmt.Errorf("execenv: prepare codex hooks: %w", err)
+		}
 		env.CodexHome = codexHome
 	}
 
@@ -914,6 +930,9 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 			env.CodexHome = codexHome
 			if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
 				logger.Warn("execenv: refresh codex skills failed", "error", err)
+			}
+			if err := prepareCodexHooks(codexHome, params.Task.AgentHooks, logger); err != nil {
+				logger.Warn("execenv: refresh codex hooks failed", "error", err)
 			}
 		}
 	}
