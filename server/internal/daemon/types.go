@@ -216,6 +216,7 @@ type AgentData struct {
 	Instructions          string                     `json:"instructions"`
 	Skills                []SkillData                `json:"skills,omitempty"`
 	SkillRefs             []SkillRefData             `json:"skill_refs,omitempty"`
+	Hooks                 []HookData                 `json:"hooks,omitempty"`
 	CustomEnv             map[string]string          `json:"custom_env,omitempty"`
 	CustomArgs            []string                   `json:"custom_args,omitempty"`
 	McpConfig             json.RawMessage            `json:"mcp_config,omitempty"`
@@ -228,6 +229,19 @@ type AgentData struct {
 	// daemon decodes provider-specific fields (e.g. openclaw mode +
 	// gateway endpoint, see issue #3260); other backends ignore it.
 	RuntimeConfig json.RawMessage `json:"runtime_config,omitempty"`
+}
+
+// HookData is a provider-neutral managed hook definition forwarded in a task
+// claim. V1 is materialized only for Codex by execenv.
+type HookData struct {
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Command     string          `json:"command"`
+	Providers   []string        `json:"providers,omitempty"`
+	Events      []string        `json:"events"`
+	Matcher     string          `json:"matcher,omitempty"`
+	Config      json.RawMessage `json:"config,omitempty"`
 }
 
 // DisabledRuntimeSkillData is the task-wire identity of one runtime-local

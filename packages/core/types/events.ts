@@ -49,6 +49,9 @@ export type WSEventType =
   | "skill:created"
   | "skill:updated"
   | "skill:deleted"
+  | "hook:created"
+  | "hook:updated"
+  | "hook:deleted"
   | "subscriber:added"
   | "subscriber:removed"
   | "activity:created"
@@ -603,6 +606,9 @@ export interface WSEventPayloadMap {
   "skill:created": unknown;
   "skill:updated": unknown;
   "skill:deleted": unknown;
+  "hook:created": unknown;
+  "hook:updated": unknown;
+  "hook:deleted": unknown;
   "squad:created": unknown;
   "squad:updated": unknown;
   "squad:deleted": unknown;

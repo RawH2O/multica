@@ -2143,6 +2143,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		ThinkingLevel:         agent.ThinkingLevel.String,
 		ServiceTier:           agent.ServiceTier.String,
 		RuntimeConfig:         runtimeConfig,
+		Hooks:                 h.TaskService.LoadAgentHooks(r.Context(), task.AgentID),
 		DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 	}
 	// System agents carry a product-owned instruction layer that ships with

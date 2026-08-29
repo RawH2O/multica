@@ -1962,12 +1962,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/skills", h.ListAgentSkills)
 					r.Put("/skills", h.SetAgentSkills)
 					r.Post("/skills/add", h.AddAgentSkills)
+					r.Get("/hooks", h.ListAgentHooks)
+					r.Put("/hooks", h.SetAgentHooks)
+					r.Post("/hooks/add", h.AddAgentHooks)
 					r.Get("/labels", h.ListLabelsForAgent)
 					r.Post("/labels", h.AttachLabelToAgent)
 					r.Delete("/labels/{labelId}", h.DetachLabelFromAgent)
 					r.Put("/skills/{skillId}/enabled", h.SetAgentSkillEnabled)
+					r.Put("/hooks/{hookId}/enabled", h.SetAgentHookEnabled)
 					r.Put("/runtime-skills/enabled", h.SetAgentRuntimeSkillEnabled)
 					r.Delete("/skills/{skillId}", h.RemoveAgentSkill)
+					r.Delete("/hooks/{hookId}", h.RemoveAgentHook)
 					// Workspace MCP servers assigned to this agent. Mirrors
 					// the skills routes above: a library entry does nothing
 					// until it is added here, and the binding carries its own
@@ -2015,6 +2020,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/files", h.ListSkillFiles)
 					r.Put("/files", h.UpsertSkillFile)
 					r.Delete("/files/{fileId}", h.DeleteSkillFile)
+				})
+			})
+
+			// Managed coding-agent hooks. V1 is Codex-only; the resource shape
+			// remains provider-neutral for a later Claude adapter.
+			r.Route("/api/hooks", func(r chi.Router) {
+				r.Get("/", h.ListHooks)
+				r.Post("/", h.CreateHook)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetHook)
+					r.Put("/", h.UpdateHook)
+					r.Delete("/", h.DeleteHook)
 				})
 			})
 

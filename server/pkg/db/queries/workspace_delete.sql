@@ -274,6 +274,9 @@ ws_labels AS MATERIALIZED (
 ws_skills AS MATERIALIZED (
     SELECT id FROM skill WHERE workspace_id = $1
 ),
+ws_hooks AS MATERIALIZED (
+    SELECT id FROM hook WHERE workspace_id = $1
+),
 ws_squads AS MATERIALIZED (
     SELECT id FROM squad WHERE workspace_id = $1
 ),
@@ -389,6 +392,11 @@ deleted_agent_skills AS (
     DELETE FROM agent_skill
     WHERE agent_id IN (SELECT id FROM ws_agents)
        OR skill_id IN (SELECT id FROM ws_skills)
+),
+deleted_agent_hooks AS (
+    DELETE FROM agent_hook
+    WHERE agent_id IN (SELECT id FROM ws_agents)
+       OR hook_id IN (SELECT id FROM ws_hooks)
 ),
 deleted_skill_files AS (
     DELETE FROM skill_file
@@ -582,6 +590,8 @@ DELETE FROM vcs_connection WHERE vcs_connection.workspace_id = $1;
 -- name: DeleteWorkspaceSquadsAndSkills :exec
 WITH deleted_squads AS (
     DELETE FROM squad WHERE squad.workspace_id = $1
+), deleted_hooks AS (
+    DELETE FROM hook WHERE hook.workspace_id = $1
 )
 DELETE FROM skill WHERE skill.workspace_id = $1;
 

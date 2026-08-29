@@ -66,6 +66,7 @@ describe("proxy legacy workspace route redirects", () => {
     ["autopilots", "/acme/autopilots"],
     ["runtimes", "/acme/runtimes"],
     ["skills", "/acme/skills"],
+    ["hooks", "/acme/hooks"],
     ["settings", "/acme/settings"],
     ["usage", "/acme/usage"],
   ])(
