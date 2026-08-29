@@ -2,6 +2,9 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
+      - master
     tags:
       # GitHub Actions uses glob patterns here, not regex. Match versioned
       # tags broadly at the trigger layer, then enforce strict semver below.
@@ -11,6 +14,10 @@ on:
 permissions:
   contents: write
   packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   verify:
@@ -24,12 +31,41 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate tag name
+      - name: Prepare and validate release tag
         id: release_meta
         shell: bash
         run: |
-          tag="${GITHUB_REF_NAME}"
-          echo "Triggered by tag: $tag"
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tag="$GITHUB_REF_NAME"
+            echo "Triggered by tag: $tag"
+          else
+            echo "Triggered by branch: $GITHUB_REF_NAME"
+            git fetch --tags --force origin
+
+            max_major=0
+            max_minor=0
+            max_patch=0
+            while IFS= read -r candidate; do
+              if [[ "$candidate" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+                major="${BASH_REMATCH[1]}"
+                minor="${BASH_REMATCH[2]}"
+                patch="${BASH_REMATCH[3]}"
+                if (( major > max_major ||
+                      (major == max_major && minor > max_minor) ||
+                      (major == max_major && minor == max_minor && patch > max_patch) )); then
+                  max_major="$major"
+                  max_minor="$minor"
+                  max_patch="$patch"
+                fi
+              fi
+            done < <(git tag --list 'v*')
+
+            tag="v${max_major}.${max_minor}.$((max_patch + 1))"
+            echo "Computed next release tag: $tag"
+          fi
+
           if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Release tags must look like vX.Y.Z or vX.Y.Z-suffix; got '$tag'."
             exit 1
@@ -74,13 +110,27 @@ jobs:
         if: ${{ vars.ALLOW_VULN_BYPASS_FOR_TAG == github.ref_name }}
         run: echo "::warning::govulncheck was explicitly skipped for ${GITHUB_REF_NAME}; see .github/RELEASING.md"
 
+      - name: Create release tag for branch push
+        if: ${{ startsWith(github.ref, 'refs/heads/') }}
+        env:
+          TAG_NAME: ${{ steps.release_meta.outputs.tag_name }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG_NAME}" >/dev/null 2>&1; then
+            echo "::error::Release tag ${TAG_NAME} already exists. Refusing to move or overwrite it."
+            exit 1
+          fi
+          git tag -a "${TAG_NAME}" "${COMMIT_SHA}" -m "Release ${TAG_NAME}"
+          git push origin "refs/tags/${TAG_NAME}"
+
   release:
     needs: verify
-    # Only run on the canonical upstream repo. Forks don't have the
-    # HOMEBREW_TAP_GITHUB_TOKEN secret and should not be publishing to
-    # `multica-ai/homebrew-tap` anyway. Without this guard, every fork's
-    # tag push fails this job (401 against the upstream tap), which makes
-    # downstream CI go red without affecting the actual artifact pipeline.
+    # The canonical repo publishes the Homebrew formula in addition to the
+    # GitHub Release. Forks use the release-fork job below so they never write
+    # to `multica-ai/homebrew-tap`.
     if: github.repository_owner == 'multica-ai'
     runs-on: ubuntu-latest
     steps:
@@ -109,6 +159,38 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+  # Downstream forks still need a consumable CLI Release (for example, when a
+  # fork carries a daemon feature ahead of upstream), but they do not have the
+  # upstream Homebrew token. GoReleaser's `brews` publisher is skipped only in
+  # this job; archives, checksums, and the GitHub Release are still published.
+  release-fork:
+    needs: verify
+    if: github.repository_owner != 'multica-ai'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+          cache-dependency-path: server/go.sum
+
+      - name: Record Go toolchain
+        run: go version
+
+      - name: Run GoReleaser without Homebrew
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean --skip=brews
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # Multi-arch images are built natively per platform on dedicated runners
   # (amd64 on ubuntu-latest, arm64 on ubuntu-24.04-arm) and merged into a
