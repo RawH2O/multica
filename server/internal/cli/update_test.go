@@ -8,6 +8,38 @@ import (
 	"time"
 )
 
+func TestReleaseRepository(t *testing.T) {
+	t.Run("defaults to the fork release repository", func(t *testing.T) {
+		t.Setenv(ReleaseRepositoryEnv, "")
+		if got := ReleaseRepository(); got != DefaultReleaseRepository {
+			t.Fatalf("ReleaseRepository() = %q, want %q", got, DefaultReleaseRepository)
+		}
+	})
+
+	t.Run("accepts a valid override", func(t *testing.T) {
+		t.Setenv(ReleaseRepositoryEnv, "example-owner/example-repo")
+		if got := ReleaseRepository(); got != "example-owner/example-repo" {
+			t.Fatalf("ReleaseRepository() = %q, want override", got)
+		}
+	})
+
+	for _, invalid := range []string{"example-owner", "/example-repo", "example-owner/", "example-owner/example repo", "https://example.com/owner/repo", "../example-repo", "example-owner/.."} {
+		t.Run("rejects "+invalid, func(t *testing.T) {
+			t.Setenv(ReleaseRepositoryEnv, invalid)
+			if got := ReleaseRepository(); got != DefaultReleaseRepository {
+				t.Fatalf("ReleaseRepository() = %q for invalid override %q, want default %q", got, invalid, DefaultReleaseRepository)
+			}
+		})
+	}
+}
+
+func TestLatestReleaseURL(t *testing.T) {
+	t.Setenv(ReleaseRepositoryEnv, "example-owner/example-repo")
+	if got, want := LatestReleaseURL(), "https://github.com/example-owner/example-repo/releases/latest"; got != want {
+		t.Fatalf("LatestReleaseURL() = %q, want %q", got, want)
+	}
+}
+
 func TestReleaseAssetCandidates(t *testing.T) {
 	tests := []struct {
 		name          string
