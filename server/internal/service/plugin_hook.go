@@ -12,6 +12,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -123,7 +124,12 @@ type hookRequestBody struct {
 	Trigger      string    `json:"trigger"`
 	EventType    string    `json:"event_type,omitempty"`
 	WorkspaceID  string    `json:"workspace_id"`
-	Installation string    `json:"installation_id"`
+	// WorkspaceSlug and AppURL are public navigation context. They let an event
+	// receiver build a user-facing link without guessing a workspace slug from
+	// the opaque workspace UUID.
+	WorkspaceSlug string `json:"workspace_slug,omitempty"`
+	AppURL        string `json:"app_url,omitempty"`
+	Installation  string `json:"installation_id"`
 	// IssueID is the issue this call is about, as resolved and permission-checked
 	// by the host. Sent because the alternative is every handler reading it out
 	// of client-supplied `input` — unvalidated, and absent entirely for the event
@@ -395,8 +401,14 @@ func (s *PluginService) buildHookBody(ctx context.Context, invocation HookInvoca
 		Trigger:      invocation.Trigger,
 		EventType:    invocation.EventType,
 		WorkspaceID:  uuidString(invocation.Installation.WorkspaceID),
+		AppURL:       pluginAppURLFromEnv(),
 		Installation: uuidString(invocation.Installation.ID),
 		Actor:        hookRequestActor{Type: invocation.Actor.Type, ID: uuidString(invocation.Actor.ID)},
+	}
+	if s.Queries != nil && invocation.Installation.WorkspaceID.Valid {
+		if workspace, err := s.Queries.GetWorkspace(ctx, invocation.Installation.WorkspaceID); err == nil {
+			body.WorkspaceSlug = workspace.Slug
+		}
 	}
 	if invocation.PlannedAt.Valid {
 		body.Schedule = &hookRequestSchedule{PlannedAt: invocation.PlannedAt.Time.UTC()}
@@ -421,6 +433,15 @@ func (s *PluginService) buildHookBody(ctx context.Context, invocation HookInvoca
 		body.CallbackURL = s.CallbackBaseURL
 	}
 	return body, nil
+}
+
+func pluginAppURLFromEnv() string {
+	for _, name := range []string{"MULTICA_APP_URL", "FRONTEND_ORIGIN"} {
+		if value := strings.TrimRight(strings.TrimSpace(os.Getenv(name)), "/"); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // SignHookPayload produces the hex HMAC a receiver checks.
