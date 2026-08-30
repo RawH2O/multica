@@ -7,9 +7,7 @@ version tag after verification succeeds, then publish the CLI archives and
 GitHub Release from that exact commit. For example, if the latest stable tag
 is `v0.18.3`, the workflow creates `v0.18.4`.
 
-This fork skips Homebrew publishing; the upstream repository keeps its
-Homebrew path through the owner-specific GoReleaser option. Container
-image/Helm publishing is a separate distribution concern and is not part of
+Homebrew, container image, and Helm publishing are intentionally not part of
 this CLI release workflow. If the repository has no stable tags yet, the first
 automatic release starts at `v0.0.1`; create a baseline tag first if it should
 continue an existing version line.
