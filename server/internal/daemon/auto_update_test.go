@@ -168,7 +168,7 @@ func TestTryAutoUpdate_SkipsWhenFetchFails(t *testing.T) {
 	}
 }
 
-func TestTryAutoUpdate_SkipsWhenNotNewer(t *testing.T) {
+func TestTryAutoUpdate_SkipsWhenVersionMatches(t *testing.T) {
 	d, restartCalls := newAutoUpdateTestDaemon(t, "v0.1.13")
 	withStubRelease(t, &cli.GitHubRelease{TagName: "v0.1.13"}, nil)
 
@@ -176,6 +176,26 @@ func TestTryAutoUpdate_SkipsWhenNotNewer(t *testing.T) {
 
 	if restartCalls.Load() != 0 {
 		t.Fatalf("triggerRestart fired even though latest == current")
+	}
+}
+
+func TestTryAutoUpdate_SwitchesToForkWhenItsVersionIsLower(t *testing.T) {
+	d, restartCalls := newAutoUpdateTestDaemon(t, "v0.4.25")
+	withStubRelease(t, &cli.GitHubRelease{TagName: "v0.0.3"}, nil)
+
+	var upgradedTo string
+	d.runUpdateFn = func(target string) (string, error) {
+		upgradedTo = target
+		return "upgraded", nil
+	}
+
+	d.tryAutoUpdate(context.Background())
+
+	if upgradedTo != "v0.0.3" {
+		t.Fatalf("runUpdateFn called with %q, want v0.0.3", upgradedTo)
+	}
+	if restartCalls.Load() != 1 {
+		t.Fatalf("triggerRestart fired %d times, want 1", restartCalls.Load())
 	}
 }
 

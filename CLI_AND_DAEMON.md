@@ -4,12 +4,6 @@ The `multica` CLI connects your local machine to Multica. It handles authenticat
 
 ## Installation
 
-### Homebrew (macOS/Linux)
-
-```bash
-brew install multica-ai/tap/multica
-```
-
 ### Build from Source
 
 ```bash
@@ -22,16 +16,14 @@ cp server/bin/multica /usr/local/bin/multica
 ### Update
 
 ```bash
-brew upgrade multica-ai/tap/multica
-```
-
-For install script or manual installs, use:
-
-```bash
 multica update
 ```
 
-`multica update` auto-detects your installation method and upgrades accordingly.
+`multica update` downloads from the configured GitHub Releases repository. The
+default is `RawH2O/multica`; set `MULTICA_RELEASE_REPOSITORY=owner/repo` to
+select another fork. If the binary lives in a protected directory such as
+`/usr/local/bin`, run `sudo multica update` or install it into a user-writable
+directory.
 
 ## Quick Start
 

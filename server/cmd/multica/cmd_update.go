@@ -41,29 +41,10 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 			fmt.Fprintln(os.Stderr, "Already up to date.")
 			return nil
 		}
-		// A fork may publish a lower version sequence than the binary it was
-		// forked from. Never silently downgrade a tagged release just because
-		// the configured release feed changed; an explicit reinstall is safer.
-		if cli.IsReleaseVersion(version) && !cli.IsNewerVersion(latest.TagName, version) {
-			fmt.Fprintf(os.Stderr, "Already up to date (local version %s is newer than %s).\n", version, latest.TagName)
-			return nil
-		}
 		fmt.Fprintf(os.Stderr, "Latest version:  %s\n\n", latest.TagName)
 	}
 
-	// Detect installation method and update accordingly.
-	if cli.IsBrewInstall() {
-		fmt.Fprintln(os.Stderr, "Updating via Homebrew...")
-		output, err := cli.UpdateViaBrew()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", output)
-			return fmt.Errorf("brew upgrade failed: %w\nYou can try manually: brew upgrade multica-ai/tap/multica", err)
-		}
-		fmt.Fprintln(os.Stderr, "Update complete.")
-		return nil
-	}
-
-	// Not installed via brew — download binary directly from GitHub Releases.
+	// Download and install from the configured GitHub Releases repository.
 	if latest == nil {
 		return fmt.Errorf("could not determine latest version; check %s", cli.LatestReleaseURL())
 	}
