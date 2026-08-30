@@ -95,6 +95,7 @@ const (
 	ScopeCommentsWrite    = "comments:write"
 	ScopeTasksRead        = "tasks:read"
 	ScopeTasksWrite       = "tasks:write"
+	ScopeChatRead         = "chat:read"
 	ScopeAgentsRead       = "agents:read"
 	ScopeMembersRead      = "members:read"
 	ScopeStorageUser      = "storage:user"
@@ -114,6 +115,7 @@ const (
 	EventTaskStarted        = "task.started"
 	EventTaskCompleted      = "task.completed"
 	EventTaskFailed         = "task.failed"
+	EventChatDone           = "chat.done"
 )
 
 var fixedScopes = map[string]bool{
@@ -123,6 +125,7 @@ var fixedScopes = map[string]bool{
 	ScopeCommentsWrite:    true,
 	ScopeTasksRead:        true,
 	ScopeTasksWrite:       true,
+	ScopeChatRead:         true,
 	ScopeAgentsRead:       true,
 	ScopeMembersRead:      true,
 	ScopeStorageUser:      true,
@@ -148,6 +151,7 @@ var eventReadScope = map[string]string{
 	EventTaskStarted:        ScopeTasksRead,
 	EventTaskCompleted:      ScopeTasksRead,
 	EventTaskFailed:         ScopeTasksRead,
+	EventChatDone:           ScopeChatRead,
 }
 
 var knownEvents = map[string]bool{
@@ -158,6 +162,7 @@ var knownEvents = map[string]bool{
 	EventTaskStarted:        true,
 	EventTaskCompleted:      true,
 	EventTaskFailed:         true,
+	EventChatDone:           true,
 }
 
 // IsKnownEvent reports whether an event may be subscribed to by a manifest.

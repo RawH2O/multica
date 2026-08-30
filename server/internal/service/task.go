@@ -6738,8 +6738,15 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 	if workspaceID == "" {
 		return
 	}
+	chatTitle := ""
+	if s.Queries != nil {
+		if session, err := s.Queries.GetChatSession(ctx, task.ChatSessionID); err == nil {
+			chatTitle = session.Title
+		}
+	}
 	payload := protocol.ChatDonePayload{
 		ChatSessionID:       util.UUIDToString(task.ChatSessionID),
+		ChatSessionTitle:    chatTitle,
 		TaskID:              util.UUIDToString(task.ID),
 		QuickActionsPending: quickActionsPending,
 	}

@@ -9,7 +9,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// Translating the internal event bus into the seven events a plugin may
+// Translating the internal event bus into the eight events a plugin may
 // subscribe to.
 //
 // Two vocabularies on purpose. The internal names are realtime transport
@@ -53,6 +53,7 @@ func SubscribePluginEvents(bus *events.Bus, dispatcher EventSink) {
 	bus.Subscribe(protocol.EventTaskRunning, forward(plugincontract.EventTaskStarted))
 	bus.Subscribe(protocol.EventTaskCompleted, forward(plugincontract.EventTaskCompleted))
 	bus.Subscribe(protocol.EventTaskFailed, forward(plugincontract.EventTaskFailed))
+	bus.Subscribe(protocol.EventChatDone, forward(plugincontract.EventChatDone))
 
 	// issue.status_changed has no event of its own internally: a status change
 	// is an issue:updated carrying status_changed=true. Deriving it here rather

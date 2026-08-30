@@ -236,14 +236,15 @@ const (
 // the omitempty tags only elide fields for the legacy paths that broadcast
 // without a row.
 type ChatDonePayload struct {
-	ChatSessionID string            `json:"chat_session_id"`
-	TaskID        string            `json:"task_id"`
-	MessageID     string            `json:"message_id,omitempty"`
-	Content       string            `json:"content,omitempty"`
-	ElapsedMs     int64             `json:"elapsed_ms,omitempty"`
-	CreatedAt     string            `json:"created_at,omitempty"`
-	MessageKind   string            `json:"message_kind,omitempty"`
-	QuickActions  []ChatQuickAction `json:"quick_actions,omitempty"`
+	ChatSessionID    string            `json:"chat_session_id"`
+	ChatSessionTitle string            `json:"chat_session_title,omitempty"`
+	TaskID           string            `json:"task_id"`
+	MessageID        string            `json:"message_id,omitempty"`
+	Content          string            `json:"content,omitempty"`
+	ElapsedMs        int64             `json:"elapsed_ms,omitempty"`
+	CreatedAt        string            `json:"created_at,omitempty"`
+	MessageKind      string            `json:"message_kind,omitempty"`
+	QuickActions     []ChatQuickAction `json:"quick_actions,omitempty"`
 	// QuickActionsPending tells clients a chat:quick_actions supplement will
 	// follow for this turn (render a placeholder). Never true when
 	// QuickActions is already populated.
