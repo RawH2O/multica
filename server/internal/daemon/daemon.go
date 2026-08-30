@@ -609,9 +609,9 @@ type Daemon struct {
 	// the production default; zero-valued test daemons fall back to the same
 	// default in effectiveTaskPrepareTimeout.
 	taskPrepareTimeout time.Duration
-	// runUpdateFn executes the brew-or-download upgrade. Set to d.runUpdate by
+	// runUpdateFn executes the configured GitHub Release download upgrade. Set to d.runUpdate by
 	// New() and overridable in tests so the auto-update poller can be exercised
-	// without touching the real network or the brew CLI.
+	// without touching the real network.
 	runUpdateFn func(targetVersion string) (string, error)
 }
 
@@ -4462,21 +4462,12 @@ func (d *Daemon) tryBeginServerUpdate(ctx context.Context) serverUpdateAcquireRe
 	}
 }
 
-// runUpdate executes the brew-or-download upgrade against targetVersion and
-// returns the human-readable output (always populated, even on failure when
-// brew gives us a useful diagnostic). The caller is responsible for the
+// runUpdate executes the configured GitHub Release download against
+// targetVersion and returns the human-readable output. The caller is responsible for the
 // `updating` CAS guard and for reporting status back to the server / triggering
 // the restart — extracted so the server-triggered path (handleUpdate) and the
 // auto-update poller (autoUpdateLoop) share the exact same execution body.
 func (d *Daemon) runUpdate(targetVersion string) (string, error) {
-	if cli.IsBrewInstall() {
-		d.logger.Info("updating CLI via Homebrew...")
-		out, err := cli.UpdateViaBrew()
-		if err != nil {
-			return out, fmt.Errorf("brew upgrade failed: %w", err)
-		}
-		return out, nil
-	}
 	d.logger.Info("updating CLI via direct download...", "target_version", targetVersion)
 	out, err := cli.UpdateViaDownload(targetVersion)
 	if err != nil {

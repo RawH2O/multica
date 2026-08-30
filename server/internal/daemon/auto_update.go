@@ -95,7 +95,7 @@ var selfReloadProbeTimeout = 10 * time.Second
 // which is what keeps them from racing each other into triggerRestart:
 //
 //   - tryAutoUpdate: poll GitHub for a newer release and, when the daemon is
-//     idle, run the same brew-or-download upgrade as the server-triggered path.
+//     idle, run the same direct-download upgrade as the server-triggered path.
 //   - trySelfReload: notice that the binary on disk was replaced out of band
 //     and re-exec into it.
 //

@@ -224,7 +224,7 @@ func (d *Daemon) repoCheckoutAuthErrorMessage(result repoCheckoutAuthResult) str
 	b.WriteString(" and will fail every time, not intermittently. List every copy on PATH with `")
 	b.WriteString(repoCheckoutListBinariesCommand())
 	b.WriteString("`, check each one's version, then upgrade the stale one with `multica update`")
-	b.WriteString(" — it handles Homebrew and direct installs on every platform.")
+	b.WriteString(" — it downloads the configured GitHub Release on every platform.")
 	// os.Executable() reports where this process was STARTED from, which is not
 	// a promise about the bytes on disk now: the daemon deliberately supports a
 	// binary being replaced out of band while a restart is deferred (see
