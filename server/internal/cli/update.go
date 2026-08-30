@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -31,6 +32,58 @@ import (
 const ChecksumManifestName = "checksums.txt"
 
 const DefaultUpdateDownloadTimeout = 120 * time.Second
+
+const (
+	// DefaultReleaseRepository is the repository whose GitHub Releases feed is
+	// used by the CLI and daemon self-updater. Forks can point the updater at a
+	// different release feed with MULTICA_RELEASE_REPOSITORY.
+	DefaultReleaseRepository = "RawH2O/multica"
+	ReleaseRepositoryEnv     = "MULTICA_RELEASE_REPOSITORY"
+)
+
+// ReleaseRepository returns the configured GitHub owner/repository for CLI
+// releases. Keep the repository path constrained to owner/repo so an
+// environment override cannot change the GitHub API host or URL structure.
+func ReleaseRepository() string {
+	repository := strings.TrimSpace(os.Getenv(ReleaseRepositoryEnv))
+	if isValidReleaseRepository(repository) {
+		return repository
+	}
+	return DefaultReleaseRepository
+}
+
+func isValidReleaseRepository(repository string) bool {
+	parts := strings.Split(repository, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return false
+	}
+	for _, part := range parts {
+		if part == "." || part == ".." {
+			return false
+		}
+		for _, char := range part {
+			if (char >= 'a' && char <= 'z') ||
+				(char >= 'A' && char <= 'Z') ||
+				(char >= '0' && char <= '9') ||
+				char == '-' || char == '_' || char == '.' {
+				continue
+			}
+			return false
+		}
+	}
+	return true
+}
+
+func releaseAPIBaseURL() string {
+	return "https://api.github.com/repos/" + ReleaseRepository() + "/releases"
+}
+
+// LatestReleaseURL returns the browser URL for the configured latest release.
+// It is used in user-facing errors so the remediation link matches the feed
+// the updater actually queried.
+func LatestReleaseURL() string {
+	return "https://github.com/" + ReleaseRepository() + "/releases/latest"
+}
 
 // GitHubRelease is the subset of the GitHub releases API response we need.
 type GitHubRelease struct {
@@ -226,7 +279,7 @@ func verifyAssetSHA256(data []byte, expectedHex, assetName string) error {
 
 func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/tags/"+tag, nil)
+	req, err := http.NewRequest(http.MethodGet, releaseAPIBaseURL()+"/tags/"+url.PathEscape(tag), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -249,10 +302,11 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	return &release, nil
 }
 
-// FetchLatestRelease fetches the latest release tag from the multica GitHub repo.
+// FetchLatestRelease fetches the latest release tag from the configured GitHub
+// repository.
 func FetchLatestRelease() (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, "https://api.github.com/repos/multica-ai/multica/releases/latest", nil)
+	req, err := http.NewRequest(http.MethodGet, releaseAPIBaseURL()+"/latest", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -446,7 +500,10 @@ func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Dur
 	dir := filepath.Dir(exePath)
 	tmpFile, err := os.CreateTemp(dir, "multica-update-*")
 	if err != nil {
-		return "", fmt.Errorf("create temp file: %w", err)
+		if os.IsPermission(err) {
+			return "", fmt.Errorf("create temp file in %q: permission denied; run `sudo multica update` or reinstall multica into a user-writable directory: %w", dir, err)
+		}
+		return "", fmt.Errorf("create temp file in %q: %w", dir, err)
 	}
 	tmpPath := tmpFile.Name()
 

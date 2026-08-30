@@ -41,6 +41,13 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 			fmt.Fprintln(os.Stderr, "Already up to date.")
 			return nil
 		}
+		// A fork may publish a lower version sequence than the binary it was
+		// forked from. Never silently downgrade a tagged release just because
+		// the configured release feed changed; an explicit reinstall is safer.
+		if cli.IsReleaseVersion(version) && !cli.IsNewerVersion(latest.TagName, version) {
+			fmt.Fprintf(os.Stderr, "Already up to date (local version %s is newer than %s).\n", version, latest.TagName)
+			return nil
+		}
 		fmt.Fprintf(os.Stderr, "Latest version:  %s\n\n", latest.TagName)
 	}
 
@@ -58,7 +65,7 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 
 	// Not installed via brew — download binary directly from GitHub Releases.
 	if latest == nil {
-		return fmt.Errorf("could not determine latest version; check https://github.com/multica-ai/multica/releases/latest")
+		return fmt.Errorf("could not determine latest version; check %s", cli.LatestReleaseURL())
 	}
 	targetVersion := latest.TagName
 	fmt.Fprintf(os.Stderr, "Downloading %s from GitHub Releases...\n", targetVersion)
