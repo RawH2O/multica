@@ -3,14 +3,16 @@
 ## Normal release
 
 Merges or direct pushes to `main`/`master` automatically create the next patch
-version tag after verification succeeds, then publish the binaries, Homebrew
-formula, and container images from that exact commit. For example, if the
-latest stable tag is `v0.18.3`, the workflow creates `v0.18.4`.
+version tag after verification succeeds, then publish the CLI archives and
+GitHub Release from that exact commit. For example, if the latest stable tag
+is `v0.18.3`, the workflow creates `v0.18.4`.
 
-On a fork, the workflow publishes the CLI archives and GitHub Release but skips
-the upstream Homebrew tap. If the fork has no stable tags yet, the first
-automatic release starts at `v0.0.1`; create a baseline tag first if the fork
-should continue an existing upstream version line.
+This fork skips Homebrew publishing; the upstream repository keeps its
+Homebrew path through the owner-specific GoReleaser option. Container
+image/Helm publishing is a separate distribution concern and is not part of
+this CLI release workflow. If the repository has no stable tags yet, the first
+automatic release starts at `v0.0.1`; create a baseline tag first if it should
+continue an existing version line.
 
 The existing version-tag trigger remains available for maintainers who need to
 publish a prerelease or a deliberately selected version. A tag created by the
