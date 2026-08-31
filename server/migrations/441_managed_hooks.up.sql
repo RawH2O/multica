@@ -2,7 +2,7 @@
 -- are materialized into a provider's task-local configuration by the daemon.
 -- V1 accepts Codex only; providers is kept as an array so the resource can
 -- grow without changing the relationship model.
-CREATE TABLE hook (
+CREATE TABLE IF NOT EXISTS hook (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
     name TEXT NOT NULL,
@@ -20,7 +20,7 @@ CREATE TABLE hook (
     CHECK (char_length(command) BETWEEN 1 AND 4096)
 );
 
-CREATE TABLE agent_hook (
+CREATE TABLE IF NOT EXISTS agent_hook (
     agent_id UUID NOT NULL REFERENCES agent(id) ON DELETE CASCADE,
     hook_id UUID NOT NULL REFERENCES hook(id) ON DELETE CASCADE,
     enabled BOOLEAN NOT NULL DEFAULT TRUE,
@@ -28,6 +28,6 @@ CREATE TABLE agent_hook (
     PRIMARY KEY (agent_id, hook_id)
 );
 
-CREATE INDEX idx_hook_workspace ON hook(workspace_id);
-CREATE INDEX idx_agent_hook_hook ON agent_hook(hook_id);
-CREATE INDEX idx_agent_hook_agent ON agent_hook(agent_id);
+CREATE INDEX IF NOT EXISTS idx_hook_workspace ON hook(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_agent_hook_hook ON agent_hook(hook_id);
+CREATE INDEX IF NOT EXISTS idx_agent_hook_agent ON agent_hook(agent_id);
