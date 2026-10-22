@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS agent_hook;
+DROP TABLE IF EXISTS hook;

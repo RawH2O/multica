@@ -17,7 +17,6 @@ import (
 var (
 	fetchLatestRelease = cli.FetchLatestRelease
 	isReleaseVersion   = cli.IsReleaseVersion
-	isNewerVersion     = cli.IsNewerVersion
 )
 
 // detectSelfVersion runs `<path> --version` and returns the version field.
@@ -94,8 +93,8 @@ var selfReloadProbeTimeout = 10 * time.Second
 // different multica binary". It runs two independent checks on one goroutine,
 // which is what keeps them from racing each other into triggerRestart:
 //
-//   - tryAutoUpdate: poll GitHub for a newer release and, when the daemon is
-//     idle, run the same brew-or-download upgrade as the server-triggered path.
+//   - tryAutoUpdate: poll the configured GitHub Release and, when the daemon
+//     is idle and its version differs, run the direct-download upgrade.
 //   - trySelfReload: notice that the binary on disk was replaced out of band
 //     and re-exec into it.
 //
@@ -191,7 +190,7 @@ func (d *Daemon) autoUpdateLoop(ctx context.Context) {
 // tryAutoUpdate runs one check-and-maybe-upgrade cycle. Bails early on any of:
 // already updating (server-triggered upgrade in flight), active tasks (defer
 // to next tick — we never interrupt running agents), version fetch failure,
-// or no newer release. The function never returns an error: a check that
+// or no release change. The function never returns an error: a check that
 // fails today will be retried at the next tick, and we don't want a transient
 // network blip to escalate to a process-level shutdown.
 func (d *Daemon) tryAutoUpdate(ctx context.Context) {
@@ -224,7 +223,12 @@ func (d *Daemon) tryAutoUpdate(ctx context.Context) {
 	if release == nil || release.TagName == "" {
 		return
 	}
-	if !isNewerVersion(release.TagName, d.cfg.CLIVersion) {
+	if !isReleaseVersion(release.TagName) {
+		return
+	}
+	latestVersion := strings.TrimPrefix(strings.TrimSpace(release.TagName), "v")
+	currentVersion := strings.TrimPrefix(strings.TrimSpace(d.cfg.CLIVersion), "v")
+	if latestVersion == currentVersion {
 		return
 	}
 
@@ -261,7 +265,7 @@ func (d *Daemon) tryAutoUpdate(ctx context.Context) {
 		}
 	}()
 
-	d.logger.Info("auto-update: newer release available, upgrading",
+	d.logger.Info("auto-update: fork release differs, upgrading",
 		"current", d.cfg.CLIVersion, "target", release.TagName)
 
 	output, err := d.runUpdateFn(release.TagName)
@@ -301,11 +305,10 @@ func (d *Daemon) tryAutoUpdate(ctx context.Context) {
 // overwrite never does.
 //
 // tryAutoUpdate does eventually recover the most common shape of this — the
-// running version is older than the latest release, so it re-runs the upgrade
-// (a no-op under brew) and restarts. What it cannot recover is the rest:
+// running version differs from the configured fork's latest release, so it
+// re-runs the upgrade and restarts. What it cannot recover is the rest:
 // self-hosted daemons where auto-update is default-off (MUL-2381), dev builds
-// skipped by isReleaseVersion, and installing something GitHub doesn't consider
-// newer (a deliberate downgrade, or an intermediate version). It is also up to
+// skipped by isReleaseVersion. It is also up to
 // a full check interval slow. This check closes all of that, which is why it
 // has its own switch (--no-auto-reload / MULTICA_DAEMON_AUTO_RELOAD=false /
 // disable_auto_reload) rather than riding on MULTICA_DAEMON_AUTO_UPDATE.

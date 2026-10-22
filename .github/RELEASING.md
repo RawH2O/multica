@@ -2,10 +2,20 @@
 
 ## Normal release
 
-Release from a reviewed commit on `main` by creating and pushing a new semantic
-version tag such as `v0.18.4`. The Release workflow intentionally has no manual
-trigger: a tag push is the only event that can publish binaries, Homebrew
-formulae, and container images.
+Merges or direct pushes to `main`/`master` automatically create the next patch
+version tag after verification succeeds, then publish the CLI archives and
+GitHub Release from that exact commit. For example, if the latest stable tag
+is `v0.18.3`, the workflow creates `v0.18.4`.
+
+Homebrew, container image, and Helm publishing are intentionally not part of
+this CLI release workflow. If the repository has no stable tags yet, the first
+automatic release starts at `v0.0.1`; create a baseline tag first if it should
+continue an existing version line.
+
+The existing version-tag trigger remains available for maintainers who need to
+publish a prerelease or a deliberately selected version. A tag created by the
+branch workflow is released in that same workflow; it does not depend on a
+second workflow run from the tag push.
 
 The verification job runs the Go tests and `govulncheck` before any publishing
 job starts. The vulnerability scan is fail-closed by default.

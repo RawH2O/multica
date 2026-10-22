@@ -487,7 +487,7 @@ func TestVCSWebhook_GitlabMergeRequest(t *testing.T) {
 }
 
 
-func setIssueAssigneeDirect(t *testing.T, issueID, assigneeType, assigneeID string) {
+func setVCSIssueAssigneeDirect(t *testing.T, issueID, assigneeType, assigneeID string) {
 	t.Helper()
 	if _, err := testPool.Exec(context.Background(),
 		`UPDATE issue SET assignee_type = $2, assignee_id = $3 WHERE id = $1`, issueID, assigneeType, assigneeID); err != nil {
@@ -515,7 +515,7 @@ func parentSystemCommentContent(t *testing.T, issueID string) string {
 	return content
 }
 
-func countPendingTasksForAgent(t *testing.T, issueID, agentID string) int {
+func countVCSPendingTasksForAgent(t *testing.T, issueID, agentID string) int {
 	t.Helper()
 	var count int
 	if err := testPool.QueryRow(context.Background(),
@@ -578,7 +578,7 @@ func TestVCSWebhook_GitlabCIFailureReplaysAfterMRUpdate(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, "Handler Test Agent").Scan(&agentID); err != nil {
 		t.Fatalf("locate test agent: %v", err)
 	}
-	setIssueAssigneeDirect(t, issue.ID, "agent", agentID)
+	setVCSIssueAssigneeDirect(t, issue.ID, "agent", agentID)
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issue.ID)
 		cleanupVCS(ctx, issue.ID)
@@ -597,7 +597,7 @@ func TestVCSWebhook_GitlabCIFailureReplaysAfterMRUpdate(t *testing.T) {
 	if got := countSystemCommentsOn(t, issue.ID); got != 1 {
 		t.Fatalf("expected one replayed CI failure comment, got %d", got)
 	}
-	if got := countPendingTasksForAgent(t, issue.ID, agentID); got != 1 {
+	if got := countVCSPendingTasksForAgent(t, issue.ID, agentID); got != 1 {
 		t.Fatalf("expected one pending agent task, got %d", got)
 	}
 	fireGitLabMergeRequestWebhook(t, connID, issue.Identifier, sha, "2026-08-23T01:01:00Z")
@@ -616,7 +616,7 @@ func TestVCSWebhook_GitlabCIFailureNotifiesAfterMR(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, "Handler Test Agent").Scan(&agentID); err != nil {
 		t.Fatalf("locate test agent: %v", err)
 	}
-	setIssueAssigneeDirect(t, issue.ID, "agent", agentID)
+	setVCSIssueAssigneeDirect(t, issue.ID, "agent", agentID)
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issue.ID)
 		cleanupVCS(ctx, issue.ID)
@@ -629,7 +629,7 @@ func TestVCSWebhook_GitlabCIFailureNotifiesAfterMR(t *testing.T) {
 	if got := countSystemCommentsOn(t, issue.ID); got != 1 {
 		t.Fatalf("duplicate failed pipeline must produce one comment, got %d", got)
 	}
-	if got := countPendingTasksForAgent(t, issue.ID, agentID); got != 1 {
+	if got := countVCSPendingTasksForAgent(t, issue.ID, agentID); got != 1 {
 		t.Fatalf("duplicate failed pipeline must produce one pending task, got %d", got)
 	}
 }
