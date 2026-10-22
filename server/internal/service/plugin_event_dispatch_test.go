@@ -100,6 +100,7 @@ func TestEventBridgeMapsInternalEventsToThePublishedVocabulary(t *testing.T) {
 	bus.Publish(events.Event{Type: protocol.EventTaskRunning, WorkspaceID: workspace})
 	bus.Publish(events.Event{Type: protocol.EventTaskCompleted, WorkspaceID: workspace})
 	bus.Publish(events.Event{Type: protocol.EventTaskFailed, WorkspaceID: workspace})
+	bus.Publish(events.Event{Type: protocol.EventChatDone, WorkspaceID: workspace})
 	// A plain field edit is issue.updated only.
 	bus.Publish(events.Event{Type: protocol.EventIssueUpdated, WorkspaceID: workspace, Payload: map[string]any{"title_changed": true}})
 	// A status change is BOTH, so a subscriber to either sees it.
@@ -111,6 +112,7 @@ func TestEventBridgeMapsInternalEventsToThePublishedVocabulary(t *testing.T) {
 		plugincontract.EventTaskStarted,
 		plugincontract.EventTaskCompleted,
 		plugincontract.EventTaskFailed,
+		plugincontract.EventChatDone,
 		plugincontract.EventIssueUpdated,
 		plugincontract.EventIssueUpdated,
 		plugincontract.EventIssueStatusChanged,

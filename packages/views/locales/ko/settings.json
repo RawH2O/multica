@@ -484,6 +484,7 @@
       "comments_write": "댓글 작성",
       "tasks_read": "에이전트 실행 읽기",
       "tasks_write": "에이전트 실행 시작 및 업데이트",
+      "chat_read": "채팅 메시지 및 완료 이벤트 읽기",
       "agents_read": "agent 목록 읽기",
       "members_read": "멤버 목록 읽기",
       "storage_user": "멤버별로 데이터 저장",

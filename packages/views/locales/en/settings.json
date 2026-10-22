@@ -488,6 +488,7 @@
       "comments_write": "Post comments",
       "tasks_read": "Read agent runs",
       "tasks_write": "Start and update agent runs",
+      "chat_read": "Read chat messages and completion events",
       "agents_read": "Read the agent list",
       "members_read": "Read the member list",
       "storage_user": "Store data for each member individually",

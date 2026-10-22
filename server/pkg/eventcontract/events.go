@@ -25,6 +25,7 @@ const (
 	EventTaskCompleted             = "task.completed"
 	EventTaskFailed                = "task.failed"
 	EventTaskCancelled             = "task.cancelled"
+	EventChatDone                  = "chat.done"
 	EventReactionAdded             = "reaction.added"
 	EventReactionRemoved           = "reaction.removed"
 	EventAttachmentAttached        = "attachment.attached"

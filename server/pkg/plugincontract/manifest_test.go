@@ -398,7 +398,7 @@ func TestParseManifestRejectsOversizedDocument(t *testing.T) {
 func TestValidateScope(t *testing.T) {
 	valid := []string{
 		ScopeIssuesRead, ScopeIssuesWrite, ScopeCommentsRead, ScopeCommentsWrite,
-		ScopeTasksRead, ScopeTasksWrite, ScopeAgentsRead, ScopeMembersRead,
+		ScopeTasksRead, ScopeTasksWrite, ScopeChatRead, ScopeAgentsRead, ScopeMembersRead,
 		ScopeStorageUser, ScopeStorageWorkspace,
 		"net:example.com", "net:api.example.co.uk",
 	}
@@ -571,6 +571,8 @@ func TestEventSubscriptionRequiresTheMatchingReadScope(t *testing.T) {
 		"comment event with comments:read":    {`["comments:read", "net:example.com"]`, `["comment.created"]`, false},
 		"task event without tasks:read":       {`["net:example.com"]`, `["task.failed"]`, true},
 		"task event with tasks:read":          {`["tasks:read", "net:example.com"]`, `["task.failed"]`, false},
+		"chat event without chat:read":        {`["net:example.com"]`, `["chat.done"]`, true},
+		"chat event with chat:read":           {`["chat:read", "net:example.com"]`, `["chat.done"]`, false},
 		"one of several events unscoped": {
 			`["issues:read", "net:example.com"]`, `["issue.created", "comment.created"]`, true,
 		},

@@ -484,6 +484,7 @@
       "comments_write": "发表评论",
       "tasks_read": "读取智能体运行",
       "tasks_write": "启动和更新智能体运行",
+      "chat_read": "读取聊天消息和完成事件",
       "agents_read": "读取智能体列表",
       "members_read": "读取成员列表",
       "storage_user": "为每位成员单独存储数据",

@@ -143,6 +143,7 @@ function scopeDescription(scope: string, t: Translate): string {
     case "comments:write": return t(($) => $.plugins.scopes.comments_write);
     case "tasks:read": return t(($) => $.plugins.scopes.tasks_read);
     case "tasks:write": return t(($) => $.plugins.scopes.tasks_write);
+    case "chat:read": return t(($) => $.plugins.scopes.chat_read);
     case "agents:read": return t(($) => $.plugins.scopes.agents_read);
     case "members:read": return t(($) => $.plugins.scopes.members_read);
     case "storage:user": return t(($) => $.plugins.scopes.storage_user);

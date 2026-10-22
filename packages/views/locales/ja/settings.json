@@ -484,6 +484,7 @@
       "comments_write": "コメントを投稿する",
       "tasks_read": "エージェントの実行を読み取る",
       "tasks_write": "エージェントの実行を開始・更新する",
+      "chat_read": "チャットメッセージと完了イベントを読み取る",
       "agents_read": "agent 一覧を読み取る",
       "members_read": "メンバー一覧を読み取る",
       "storage_user": "メンバーごとにデータを保存する",

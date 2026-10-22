@@ -488,6 +488,7 @@
       "comments_write": "Publier des commentaires",
       "tasks_read": "Lire les exécutions des agents",
       "tasks_write": "Démarrer et mettre à jour les exécutions des agents",
+      "chat_read": "Lire les messages et les événements de fin des conversations",
       "agents_read": "Lire la liste des agents",
       "members_read": "Lire la liste des membres",
       "storage_user": "Stocker des données pour chaque membre séparément",
