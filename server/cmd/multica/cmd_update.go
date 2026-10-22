@@ -30,7 +30,7 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 
 	fmt.Fprintf(os.Stderr, "Current version: %s (commit: %s, built: %s)\n", version, commit, date)
 
-	// Check the configured release source.
+	// Check latest version from GitHub.
 	latest, err := cli.FetchLatestRelease()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: could not check latest version: %v\n", err)
@@ -44,24 +44,12 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 		fmt.Fprintf(os.Stderr, "Latest version:  %s\n\n", latest.TagName)
 	}
 
-	// Detect installation method and update accordingly.
-	if cli.IsBrewInstall() {
-		fmt.Fprintln(os.Stderr, "Updating via Homebrew...")
-		output, err := cli.UpdateViaBrew()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s\n", output)
-			return fmt.Errorf("brew upgrade failed: %w\nYou can try manually: brew upgrade multica-ai/tap/multica", err)
-		}
-		fmt.Fprintln(os.Stderr, "Update complete.")
-		return nil
-	}
-
-	// Not installed via brew — download the binary from the configured release source.
+	// Download and install from the configured GitHub Releases repository.
 	if latest == nil {
-		return fmt.Errorf("could not determine latest version; check the configured release source")
+		return fmt.Errorf("could not determine latest version; check %s", cli.LatestReleaseURL())
 	}
 	targetVersion := latest.TagName
-	fmt.Fprintf(os.Stderr, "Downloading %s from the configured release source...\n", targetVersion)
+	fmt.Fprintf(os.Stderr, "Downloading %s from GitHub Releases...\n", targetVersion)
 	output, err := cli.UpdateViaDownloadWithTimeout(targetVersion, updateDownloadTimeout)
 	if err != nil {
 		return fmt.Errorf("update failed: %w", err)

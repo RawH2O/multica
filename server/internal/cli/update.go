@@ -31,33 +31,24 @@ import (
 // changes one place.
 const ChecksumManifestName = "checksums.txt"
 
-const defaultReleaseAPIBaseURL = "https://api.github.com"
-
-// MULTICA_RELEASE_API_BASE_URL points at a GitHub Releases API-compatible
-// mirror. MULTICA_RELEASE_DOWNLOAD_BASE_URL points at an artifact mirror
-// serving /<tag>/<asset-name>; when unset, the release-provided URLs win.
-const releaseAPIBaseURLEnv = "MULTICA_RELEASE_API_BASE_URL"
-const releaseDownloadBaseURLEnv = "MULTICA_RELEASE_DOWNLOAD_BASE_URL"
-
 const DefaultUpdateDownloadTimeout = 120 * time.Second
 
+const DefaultReleaseRepository = "RawH2O/multica"
+
+// ReleaseRepository returns the fixed GitHub owner/repository for CLI releases.
+// The fork owns its release feed, so an environment variable cannot redirect
+// unattended updates to another repository.
+func ReleaseRepository() string {
+	return DefaultReleaseRepository
+}
+
 func releaseAPIBaseURL() string {
-	if value := strings.TrimRight(strings.TrimSpace(os.Getenv(releaseAPIBaseURLEnv)), "/"); value != "" {
-		return value
-	}
-	return defaultReleaseAPIBaseURL
+	return "https://api.github.com/repos/" + DefaultReleaseRepository + "/releases"
 }
 
-func releaseDownloadBaseURL() string {
-	return strings.TrimRight(strings.TrimSpace(os.Getenv(releaseDownloadBaseURLEnv)), "/")
-}
-
-func releaseAssetDownloadURL(assetName, targetVersion, fallback string) string {
-	base := releaseDownloadBaseURL()
-	if base == "" {
-		return fallback
-	}
-	return fmt.Sprintf("%s/%s/%s", base, url.PathEscape(normalizeReleaseTag(targetVersion)), url.PathEscape(assetName))
+// LatestReleaseURL returns the browser URL for this fork's latest release.
+func LatestReleaseURL() string {
+	return "https://github.com/" + DefaultReleaseRepository + "/releases/latest"
 }
 
 // GitHubRelease is the subset of the GitHub releases API response we need.
@@ -254,7 +245,7 @@ func verifyAssetSHA256(data []byte, expectedHex, assetName string) error {
 
 func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, releaseAPIBaseURL()+"/repos/multica-ai/multica/releases/tags/"+url.PathEscape(tag), nil)
+	req, err := http.NewRequest(http.MethodGet, releaseAPIBaseURL()+"/tags/"+url.PathEscape(tag), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +258,7 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("release API returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
 	}
 
 	var release GitHubRelease
@@ -277,10 +268,11 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	return &release, nil
 }
 
-// FetchLatestRelease fetches the latest release tag from the multica GitHub repo.
+// FetchLatestRelease fetches the latest release tag from the configured GitHub
+// repository.
 func FetchLatestRelease() (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	req, err := http.NewRequest(http.MethodGet, releaseAPIBaseURL()+"/repos/multica-ai/multica/releases/latest", nil)
+	req, err := http.NewRequest(http.MethodGet, releaseAPIBaseURL()+"/latest", nil)
 	if err != nil {
 		return nil, err
 	}
@@ -293,7 +285,7 @@ func FetchLatestRelease() (*GitHubRelease, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("release API returned %d", resp.StatusCode)
+		return nil, fmt.Errorf("GitHub API returned %d", resp.StatusCode)
 	}
 
 	var release GitHubRelease
@@ -321,14 +313,22 @@ func MatchKnownBrewPrefix(path string) string {
 }
 
 // IsBrewInstall checks whether the running multica binary was installed via Homebrew.
-// The check itself lives in brewInstallForPath (stable_exe.go) so it stays
-// one implementation with the stable-path resolver that depends on it.
 func IsBrewInstall() bool {
 	exePath, err := selfexec.Resolve()
 	if err != nil {
 		return false
 	}
-	return brewInstallForPath(exePath)
+	resolved, err := filepath.EvalSymlinks(exePath)
+	if err != nil {
+		resolved = exePath
+	}
+
+	brewPrefix := GetBrewPrefix()
+	if brewPrefix != "" && strings.HasPrefix(resolved, brewPrefix) {
+		return true
+	}
+
+	return MatchKnownBrewPrefix(resolved) != ""
 }
 
 // GetBrewPrefix returns the Homebrew prefix by running `brew --prefix`, or empty string.
@@ -344,17 +344,6 @@ func GetBrewPrefix() string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
-}
-
-// UpdateViaBrew runs `brew upgrade multica-ai/tap/multica`.
-// Returns the combined output and any error.
-func UpdateViaBrew() (string, error) {
-	cmd := exec.Command("brew", "upgrade", "multica-ai/tap/multica")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return string(out), fmt.Errorf("brew upgrade failed: %w", err)
-	}
-	return string(out), nil
 }
 
 func updateDownloadTimeoutOrDefault(timeout time.Duration) time.Duration {
@@ -412,15 +401,14 @@ func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Dur
 	if err != nil {
 		return "", err
 	}
-	downloadURL := releaseAssetDownloadURL(asset.Name, tag, asset.BrowserDownloadURL)
+	downloadURL := asset.BrowserDownloadURL
 	assetName := asset.Name
 
 	// Pull the checksum manifest first so a release that is half-published
 	// (archives uploaded but checksums.txt not yet) fails before we eat the
 	// archive's bandwidth.
 	timeout := updateDownloadTimeoutOrDefault(downloadTimeout)
-	manifestURL := releaseAssetDownloadURL(manifestAsset.Name, tag, manifestAsset.BrowserDownloadURL)
-	manifestData, err := fetchURLBytes(manifestURL, timeout)
+	manifestData, err := fetchURLBytes(manifestAsset.BrowserDownloadURL, timeout)
 	if err != nil {
 		return "", fmt.Errorf("download checksum manifest: %w", err)
 	}
@@ -467,7 +455,10 @@ func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Dur
 	dir := filepath.Dir(exePath)
 	tmpFile, err := os.CreateTemp(dir, "multica-update-*")
 	if err != nil {
-		return "", fmt.Errorf("create temp file: %w", err)
+		if os.IsPermission(err) {
+			return "", fmt.Errorf("create temp file in %q: permission denied; run `sudo multica update` or reinstall multica into a user-writable directory: %w", dir, err)
+		}
+		return "", fmt.Errorf("create temp file in %q: %w", dir, err)
 	}
 	tmpPath := tmpFile.Name()
 

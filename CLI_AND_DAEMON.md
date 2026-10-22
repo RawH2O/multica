@@ -4,16 +4,10 @@ The `multica` CLI connects your local machine to Multica. It handles authenticat
 
 ## Installation
 
-### Homebrew (macOS/Linux)
-
-```bash
-brew install multica-ai/tap/multica
-```
-
 ### Build from Source
 
 ```bash
-git clone https://github.com/multica-ai/multica.git
+git clone https://github.com/RawH2O/multica.git
 cd multica
 make build
 cp server/bin/multica /usr/local/bin/multica
@@ -22,32 +16,16 @@ cp server/bin/multica /usr/local/bin/multica
 ### Update
 
 ```bash
-brew upgrade multica-ai/tap/multica
-```
-
-For install script or manual installs, use:
-
-```bash
 multica update
 ```
 
-`multica update` uses GitHub Releases by default. Self-hosted installations can
-point the CLI at a GitHub Releases-compatible metadata mirror and an artifact
-mirror without changing the command. To let a daemon poll that source, also
-enable self-update explicitly because self-hosted auto-update is disabled by
-default:
-
-```bash
-export MULTICA_RELEASE_API_BASE_URL=https://updates.example/api
-export MULTICA_RELEASE_DOWNLOAD_BASE_URL=https://updates.example/releases/download
-export MULTICA_DAEMON_AUTO_UPDATE=true
-multica update
-```
-
-The metadata mirror must serve `/repos/multica-ai/multica/releases/latest` and
-`/repos/multica-ai/multica/releases/tags/<tag>`. The artifact mirror must serve
-`/<tag>/<asset-name>` and preserve the published `checksums.txt` contents.
-When these variables are unset, the GitHub defaults remain unchanged.
+`multica update` downloads the release from the fixed
+[RawH2O/multica GitHub Releases](https://github.com/RawH2O/multica/releases).
+The updater verifies the published SHA-256 checksum before replacing the binary.
+If the binary is in a protected directory such as `/usr/local/bin`, run
+`sudo multica update` or install it into a user-writable directory. Self-hosted
+daemons keep automatic updates disabled by default; enable them explicitly with
+`MULTICA_DAEMON_AUTO_UPDATE=true`.
 
 ## Quick Start
 

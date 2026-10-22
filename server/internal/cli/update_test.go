@@ -8,6 +8,23 @@ import (
 	"time"
 )
 
+func TestReleaseRepository(t *testing.T) {
+	if got, want := ReleaseRepository(), DefaultReleaseRepository; got != want {
+		t.Fatalf("ReleaseRepository() = %q, want %q", got, want)
+	}
+	t.Setenv("MULTICA_RELEASE_REPOSITORY", "example-owner/example-repo")
+	if got, want := ReleaseRepository(), DefaultReleaseRepository; got != want {
+		t.Fatalf("ReleaseRepository() = %q after environment override, want fixed %q", got, want)
+	}
+}
+
+func TestLatestReleaseURL(t *testing.T) {
+	t.Setenv("MULTICA_RELEASE_REPOSITORY", "example-owner/example-repo")
+	if got, want := LatestReleaseURL(), "https://github.com/RawH2O/multica/releases/latest"; got != want {
+		t.Fatalf("LatestReleaseURL() = %q, want %q", got, want)
+	}
+}
+
 func TestReleaseAssetCandidates(t *testing.T) {
 	tests := []struct {
 		name          string
