@@ -179,6 +179,36 @@ func TestScheduledHookBodyExtendsVersionOneProtocol(t *testing.T) {
 	}
 }
 
+func TestHookBodyIncludesPublicAppURL(t *testing.T) {
+	t.Setenv("MULTICA_APP_URL", "https://app.multica.test/")
+	t.Setenv("FRONTEND_ORIGIN", "https://frontend.multica.test/")
+
+	body, err := (&PluginService{}).buildHookBody(context.Background(), HookInvocation{
+		Installation: db.PluginInstallation{
+			ID:          testInstallationID(t),
+			WorkspaceID: parseUUIDValueForTest(t, "33333333-3333-4333-8333-333333333333"),
+		},
+		Hook: plugincontract.Hook{Key: "notify"},
+	})
+	if err != nil {
+		t.Fatalf("build hook body: %v", err)
+	}
+	if body.AppURL != "https://app.multica.test" {
+		t.Fatalf("app_url = %q, want MULTICA_APP_URL without trailing slash", body.AppURL)
+	}
+
+	t.Setenv("MULTICA_APP_URL", "")
+	body, err = (&PluginService{}).buildHookBody(context.Background(), HookInvocation{
+		Installation: db.PluginInstallation{WorkspaceID: parseUUIDValueForTest(t, "33333333-3333-4333-8333-333333333333")},
+	})
+	if err != nil {
+		t.Fatalf("build hook body with fallback: %v", err)
+	}
+	if body.AppURL != "https://frontend.multica.test" {
+		t.Fatalf("app_url fallback = %q, want FRONTEND_ORIGIN without trailing slash", body.AppURL)
+	}
+}
+
 func parseUUIDValueForTest(t *testing.T, value string) pgtype.UUID {
 	t.Helper()
 	parsed, err := parseUUIDValue(value)
