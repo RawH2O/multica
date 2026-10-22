@@ -2,6 +2,9 @@ name: Release
 
 on:
   push:
+    branches:
+      - main
+      - master
     tags:
       # GitHub Actions uses glob patterns here, not regex. Match versioned
       # tags broadly at the trigger layer, then enforce strict semver below.
@@ -30,12 +33,39 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate tag name
+      - name: Prepare release tag
         id: release_meta
         shell: bash
         run: |
-          tag="${GITHUB_REF_NAME}"
-          echo "Triggered by tag: $tag"
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            tag="$GITHUB_REF_NAME"
+          else
+            git fetch --tags --force origin
+            max_major=0
+            max_minor=0
+            max_patch=0
+            while IFS= read -r candidate; do
+              if [[ "$candidate" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+                major="${BASH_REMATCH[1]}"
+                minor="${BASH_REMATCH[2]}"
+                patch="${BASH_REMATCH[3]}"
+                if (( major > max_major ||
+                      (major == max_major && minor > max_minor) ||
+                      (major == max_major && minor == max_minor && patch > max_patch) )); then
+                  max_major="$major"
+                  max_minor="$minor"
+                  max_patch="$patch"
+                fi
+              fi
+            done < <(git tag --list 'v*')
+            tag="v${max_major}.${max_minor}.$((max_patch + 1))"
+            echo "Generated release tag for ${GITHUB_REF_NAME}: $tag"
+          else
+            echo "Triggered by tag: $tag"
+          fi
+
           if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "::error::Release tags must look like vX.Y.Z or vX.Y.Z-suffix; got '$tag'."
             exit 1
@@ -72,13 +102,29 @@ jobs:
       - name: Scan Go vulnerabilities
         # Fail closed unless an administrator scopes the documented emergency
         # override to this exact tag. See .github/RELEASING.md.
-        if: ${{ vars.ALLOW_VULN_BYPASS_FOR_TAG != github.ref_name }}
+        if: ${{ vars.ALLOW_VULN_BYPASS_FOR_TAG != steps.release_meta.outputs.tag_name }}
         working-directory: server
         run: go tool govulncheck ./...
 
       - name: Record emergency vulnerability-scan bypass
-        if: ${{ vars.ALLOW_VULN_BYPASS_FOR_TAG == github.ref_name }}
-        run: echo "::warning::govulncheck was explicitly skipped for ${GITHUB_REF_NAME}; see .github/RELEASING.md"
+        if: ${{ vars.ALLOW_VULN_BYPASS_FOR_TAG == steps.release_meta.outputs.tag_name }}
+        run: echo "::warning::govulncheck was explicitly skipped for ${{ steps.release_meta.outputs.tag_name }}; see .github/RELEASING.md"
+
+      - name: Create release tag for branch push
+        if: ${{ startsWith(github.ref, 'refs/heads/') }}
+        env:
+          TAG_NAME: ${{ steps.release_meta.outputs.tag_name }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG_NAME}" >/dev/null 2>&1; then
+            echo "::error::Release tag ${TAG_NAME} already exists. Refusing to move or overwrite it."
+            exit 1
+          fi
+          git tag -a "${TAG_NAME}" "${COMMIT_SHA}" -m "Release ${TAG_NAME}"
+          git push origin "refs/tags/${TAG_NAME}"
 
   release:
     needs: verify
