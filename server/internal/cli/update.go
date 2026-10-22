@@ -33,56 +33,22 @@ const ChecksumManifestName = "checksums.txt"
 
 const DefaultUpdateDownloadTimeout = 120 * time.Second
 
-const (
-	// DefaultReleaseRepository is the repository whose GitHub Releases feed is
-	// used by the CLI and daemon self-updater. Forks can point the updater at a
-	// different release feed with MULTICA_RELEASE_REPOSITORY.
-	DefaultReleaseRepository = "RawH2O/multica"
-	ReleaseRepositoryEnv     = "MULTICA_RELEASE_REPOSITORY"
-)
+const DefaultReleaseRepository = "RawH2O/multica"
 
-// ReleaseRepository returns the configured GitHub owner/repository for CLI
-// releases. Keep the repository path constrained to owner/repo so an
-// environment override cannot change the GitHub API host or URL structure.
+// ReleaseRepository returns the fixed GitHub owner/repository for CLI releases.
+// The fork owns its release feed, so an environment variable cannot redirect
+// unattended updates to another repository.
 func ReleaseRepository() string {
-	repository := strings.TrimSpace(os.Getenv(ReleaseRepositoryEnv))
-	if isValidReleaseRepository(repository) {
-		return repository
-	}
 	return DefaultReleaseRepository
 }
 
-func isValidReleaseRepository(repository string) bool {
-	parts := strings.Split(repository, "/")
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return false
-	}
-	for _, part := range parts {
-		if part == "." || part == ".." {
-			return false
-		}
-		for _, char := range part {
-			if (char >= 'a' && char <= 'z') ||
-				(char >= 'A' && char <= 'Z') ||
-				(char >= '0' && char <= '9') ||
-				char == '-' || char == '_' || char == '.' {
-				continue
-			}
-			return false
-		}
-	}
-	return true
-}
-
 func releaseAPIBaseURL() string {
-	return "https://api.github.com/repos/" + ReleaseRepository() + "/releases"
+	return "https://api.github.com/repos/" + DefaultReleaseRepository + "/releases"
 }
 
-// LatestReleaseURL returns the browser URL for the configured latest release.
-// It is used in user-facing errors so the remediation link matches the feed
-// the updater actually queried.
+// LatestReleaseURL returns the browser URL for this fork's latest release.
 func LatestReleaseURL() string {
-	return "https://github.com/" + ReleaseRepository() + "/releases/latest"
+	return "https://github.com/" + DefaultReleaseRepository + "/releases/latest"
 }
 
 // GitHubRelease is the subset of the GitHub releases API response we need.
@@ -302,8 +268,7 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	return &release, nil
 }
 
-// FetchLatestRelease fetches the latest release tag from the configured GitHub
-// repository.
+// FetchLatestRelease fetches the latest release tag from RawH2O/multica.
 func FetchLatestRelease() (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, releaseAPIBaseURL()+"/latest", nil)

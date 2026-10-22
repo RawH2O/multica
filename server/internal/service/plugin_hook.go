@@ -124,7 +124,7 @@ type hookRequestBody struct {
 	Trigger      string    `json:"trigger"`
 	EventType    string    `json:"event_type,omitempty"`
 	WorkspaceID  string    `json:"workspace_id"`
-	// WorkspaceSlug and AppURL are public navigation context. They let an event
+	// WorkspaceSlug and AppURL are public navigation context. They let a hook
 	// receiver build a user-facing link without guessing a workspace slug from
 	// the opaque workspace UUID.
 	WorkspaceSlug string `json:"workspace_slug,omitempty"`
