@@ -255,6 +255,7 @@
     "tasks": "実行",
     "instructions": "指示",
     "skills": "スキル",
+    "hooks": "Hooks",
     "environment": "環境",
     "custom_args": "カスタム引数",
     "mcp_config": "MCP",

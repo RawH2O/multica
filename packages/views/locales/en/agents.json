@@ -273,6 +273,7 @@
     "tasks": "Runs",
     "instructions": "Instructions",
     "skills": "Skills",
+    "hooks": "Hooks",
     "environment": "Environment",
     "custom_args": "Custom Args",
     "mcp_config": "MCP",

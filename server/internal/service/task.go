@@ -6953,6 +6953,30 @@ func (s *TaskService) skillsWithFiles(ctx context.Context, skills []db.Skill) ([
 	return result, nil
 }
 
+// LoadAgentHooks loads the enabled workspace-managed hooks assigned to an
+// agent. Hook definitions are lightweight, so unlike Skills they do not need
+// a separate bundle/ref endpoint.
+func (s *TaskService) LoadAgentHooks(ctx context.Context, agentID pgtype.UUID) []AgentHookData {
+	hooks, err := s.Queries.ListAgentHooks(ctx, agentID)
+	if err != nil || len(hooks) == 0 {
+		return nil
+	}
+	result := make([]AgentHookData, 0, len(hooks))
+	for _, hook := range hooks {
+		result = append(result, AgentHookData{
+			ID:          util.UUIDToString(hook.ID),
+			Name:        hook.Name,
+			Description: hook.Description,
+			Command:     hook.Command,
+			Providers:   append([]string(nil), hook.Providers...),
+			Events:      append([]string(nil), hook.Events...),
+			Matcher:     hook.Matcher,
+			Config:      json.RawMessage(hook.Config),
+		})
+	}
+	return result
+}
+
 // LoadAgentSkillBundles returns every skill visible to an agent, including
 // built-ins, with stable bundle hashes and lightweight refs for slim claims.
 // It fails closed on a workspace-skill read error for the reason in
@@ -7137,6 +7161,20 @@ type AgentSkillData struct {
 	SizeBytes   int64                `json:"size_bytes,omitempty"`
 	Content     string               `json:"content"`
 	Files       []AgentSkillFileData `json:"files,omitempty"`
+}
+
+// AgentHookData represents a managed hook in a task claim. The command is
+// copied into the provider's task-local config; it is never executed by the
+// Multica server.
+type AgentHookData struct {
+	ID          string          `json:"id"`
+	Name        string          `json:"name"`
+	Description string          `json:"description,omitempty"`
+	Command     string          `json:"command"`
+	Providers   []string        `json:"providers,omitempty"`
+	Events      []string        `json:"events"`
+	Matcher     string          `json:"matcher,omitempty"`
+	Config      json.RawMessage `json:"config,omitempty"`
 }
 
 // AgentSkillFileData represents a supporting file within a skill.
