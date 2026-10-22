@@ -268,8 +268,7 @@ func fetchReleaseByTag(tag string) (*GitHubRelease, error) {
 	return &release, nil
 }
 
-// FetchLatestRelease fetches the latest release tag from the configured GitHub
-// repository.
+// FetchLatestRelease fetches the latest release tag from RawH2O/multica.
 func FetchLatestRelease() (*GitHubRelease, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
 	req, err := http.NewRequest(http.MethodGet, releaseAPIBaseURL()+"/latest", nil)

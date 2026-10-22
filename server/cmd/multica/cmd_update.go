@@ -37,14 +37,14 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 	} else {
 		latestVer := strings.TrimPrefix(latest.TagName, "v")
 		currentVer := strings.TrimPrefix(version, "v")
-		if currentVer == latestVer {
+		if cli.IsReleaseVersion(currentVer) && cli.IsReleaseVersion(latestVer) && !cli.IsNewerVersion(latestVer, currentVer) {
 			fmt.Fprintln(os.Stderr, "Already up to date.")
 			return nil
 		}
 		fmt.Fprintf(os.Stderr, "Latest version:  %s\n\n", latest.TagName)
 	}
 
-	// Download and install from the configured GitHub Releases repository.
+	// Download and install from the fixed RawH2O/multica GitHub Releases repository.
 	if latest == nil {
 		return fmt.Errorf("could not determine latest version; check %s", cli.LatestReleaseURL())
 	}
