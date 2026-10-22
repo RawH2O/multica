@@ -80,6 +80,13 @@ WHERE workspace_id = sqlc.arg('workspace_id')
 -- an ordinary issue.
 SELECT triage_state FROM issue WHERE id = $1;
 
+-- name: LockIssueForVCSFailureNotification :one
+-- Serialize the marker check and system-comment insert for one issue so a CI
+-- webhook and the MR replay path cannot both create the same reminder.
+SELECT * FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: GetIssueGCStatus :one
 SELECT workspace_id, status, updated_at
 FROM issue
