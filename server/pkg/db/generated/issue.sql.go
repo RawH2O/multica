@@ -1882,55 +1882,6 @@ func (q *Queries) LockIssueForDescriptionUpdate(ctx context.Context, arg LockIss
 	return i, err
 }
 
-const lockIssuesForDuplicateMark = `-- name: LockIssuesForDuplicateMark :many
-SELECT i.id,
-       (i.status = 'cancelled' AND EXISTS (
-           SELECT 1 FROM issue AS original
-           WHERE original.id = i.duplicate_of_issue_id
-             AND original.workspace_id = i.workspace_id
-       ))::boolean AS is_duplicate
-FROM issue AS i
-WHERE i.workspace_id = $1
-  AND i.id = ANY($2::uuid[])
-ORDER BY i.id
-FOR UPDATE OF i
-`
-
-type LockIssuesForDuplicateMarkParams struct {
-	WorkspaceID pgtype.UUID   `json:"workspace_id"`
-	IssueIds    []pgtype.UUID `json:"issue_ids"`
-}
-
-type LockIssuesForDuplicateMarkRow struct {
-	ID          pgtype.UUID `json:"id"`
-	IsDuplicate bool        `json:"is_duplicate"`
-}
-
-// Locks the issue being marked and its target, in id order, before the mark is
-// validated. Two marks that share an issue (A -> B racing B -> A, or C -> A
-// racing A -> B) then run one after the other, so the second one validates
-// against what the first wrote. A target outside the workspace is not returned.
-// is_duplicate applies the same validity rule as the reads below.
-func (q *Queries) LockIssuesForDuplicateMark(ctx context.Context, arg LockIssuesForDuplicateMarkParams) ([]LockIssuesForDuplicateMarkRow, error) {
-	rows, err := q.db.Query(ctx, lockIssuesForDuplicateMark, arg.WorkspaceID, arg.IssueIds)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []LockIssuesForDuplicateMarkRow{}
-	for rows.Next() {
-		var i LockIssuesForDuplicateMarkRow
-		if err := rows.Scan(&i.ID, &i.IsDuplicate); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const lockIssueForVCSFailureNotification = `-- name: LockIssueForVCSFailureNotification :one
 SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision, last_activity_at, triage_state, duplicate_of_issue_id FROM issue
 WHERE id = $1 AND workspace_id = $2
@@ -1980,6 +1931,55 @@ func (q *Queries) LockIssueForVCSFailureNotification(ctx context.Context, arg Lo
 		&i.DuplicateOfIssueID,
 	)
 	return i, err
+}
+
+const lockIssuesForDuplicateMark = `-- name: LockIssuesForDuplicateMark :many
+SELECT i.id,
+       (i.status = 'cancelled' AND EXISTS (
+           SELECT 1 FROM issue AS original
+           WHERE original.id = i.duplicate_of_issue_id
+             AND original.workspace_id = i.workspace_id
+       ))::boolean AS is_duplicate
+FROM issue AS i
+WHERE i.workspace_id = $1
+  AND i.id = ANY($2::uuid[])
+ORDER BY i.id
+FOR UPDATE OF i
+`
+
+type LockIssuesForDuplicateMarkParams struct {
+	WorkspaceID pgtype.UUID   `json:"workspace_id"`
+	IssueIds    []pgtype.UUID `json:"issue_ids"`
+}
+
+type LockIssuesForDuplicateMarkRow struct {
+	ID          pgtype.UUID `json:"id"`
+	IsDuplicate bool        `json:"is_duplicate"`
+}
+
+// Locks the issue being marked and its target, in id order, before the mark is
+// validated. Two marks that share an issue (A -> B racing B -> A, or C -> A
+// racing A -> B) then run one after the other, so the second one validates
+// against what the first wrote. A target outside the workspace is not returned.
+// is_duplicate applies the same validity rule as the reads below.
+func (q *Queries) LockIssuesForDuplicateMark(ctx context.Context, arg LockIssuesForDuplicateMarkParams) ([]LockIssuesForDuplicateMarkRow, error) {
+	rows, err := q.db.Query(ctx, lockIssuesForDuplicateMark, arg.WorkspaceID, arg.IssueIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []LockIssuesForDuplicateMarkRow{}
+	for rows.Next() {
+		var i LockIssuesForDuplicateMarkRow
+		if err := rows.Scan(&i.ID, &i.IsDuplicate); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const markIssueFirstExecuted = `-- name: MarkIssueFirstExecuted :one
