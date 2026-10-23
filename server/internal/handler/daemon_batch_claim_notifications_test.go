@@ -269,7 +269,7 @@ func TestClaimTasksByRuntime_ResponsePrecedesRecoveryNotifications(t *testing.T)
 			var clientErr error
 			var conn *websocket.Conn
 			if transport == "http" {
-				client := &http.Client{Timeout: 5 * time.Second}
+				client := &http.Client{Timeout: protocol.DaemonBatchClaimRequestTimeout}
 				resp, err := client.Post(server.URL, "application/json", bytes.NewReader(body))
 				clientErr = err
 				if resp != nil {
@@ -282,7 +282,7 @@ func TestClaimTasksByRuntime_ResponsePrecedesRecoveryNotifications(t *testing.T)
 					t.Fatal(err)
 				}
 				defer conn.Close()
-				payload, err := json.Marshal(protocol.RPCRequestPayload{RequestID: "notifications", Method: "tasks.claim", TimeoutMs: 5000, Body: body})
+				payload, err := json.Marshal(protocol.RPCRequestPayload{RequestID: "notifications", Method: "tasks.claim", TimeoutMs: int(protocol.DaemonBatchClaimRequestTimeout.Milliseconds()), Body: body})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -318,7 +318,7 @@ func TestClaimTasksByRuntime_ResponsePrecedesRecoveryNotifications(t *testing.T)
 			case <-time.After(10 * time.Second):
 				t.Fatal("recovery did not finish in the request worker")
 			}
-			if clientErr != nil || elapsed >= 5*time.Second {
+			if clientErr != nil || elapsed >= protocol.DaemonBatchClaimRequestTimeout {
 				t.Fatalf("%s payload waited for recovery notifications: elapsed=%s error=%v", transport, elapsed, clientErr)
 			}
 			if len(response.Tasks) != 1 || response.Tasks[0].ID != taskA || response.Tasks[0].AuthToken == "" {

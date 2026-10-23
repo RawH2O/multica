@@ -47,8 +47,8 @@ func (d *slowBatchClaimDB) QueryRow(ctx context.Context, query string, args ...a
 }
 
 // A builds successfully, B exhausts the build deadline, and recovery remains
-// slow. A must still reach installed WS (7s) and HTTP (5s) clients. This failed
-// at about 8s with the previous independent five-second recovery budget.
+// slow. A must still reach installed WS and HTTP clients inside the shared
+// batch-claim budget. This failed with the previous independent recovery budget.
 func TestClaimTasksByRuntime_PartialSuccessFitsClientDeadlines(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -106,7 +106,7 @@ func TestClaimTasksByRuntime_PartialSuccessFitsClientDeadlines(t *testing.T) {
 					}
 					defer conn.Close()
 					payload, err := json.Marshal(protocol.RPCRequestPayload{
-						RequestID: "partial", Method: "tasks.claim", TimeoutMs: 5000, Body: body,
+						RequestID: "partial", Method: "tasks.claim", TimeoutMs: int(protocol.DaemonBatchClaimRequestTimeout.Milliseconds()), Body: body,
 					})
 					if err != nil {
 						t.Fatal(err)
@@ -137,7 +137,7 @@ func TestClaimTasksByRuntime_PartialSuccessFitsClientDeadlines(t *testing.T) {
 						break
 					}
 				} else {
-					client := &http.Client{Timeout: 5 * time.Second}
+					client := &http.Client{Timeout: protocol.DaemonBatchClaimRequestTimeout}
 					resp, err := client.Post(server.URL, "application/json", bytes.NewReader(body))
 					readErr = err
 					if err == nil {
@@ -159,8 +159,8 @@ func TestClaimTasksByRuntime_PartialSuccessFitsClientDeadlines(t *testing.T) {
 				if readErr != nil {
 					t.Fatalf("successful task missed %s client deadline after %s: %v", transport, elapsed, readErr)
 				}
-				if elapsed >= 5*time.Second {
-					t.Fatalf("claim took %s; must leave response time inside the existing 5s budget", elapsed)
+				if elapsed >= protocol.DaemonBatchClaimRequestTimeout {
+					t.Fatalf("claim took %s; must leave response time inside the %s budget", elapsed, protocol.DaemonBatchClaimRequestTimeout)
 				}
 				if len(response.Tasks) != 1 || response.Tasks[0].ID != taskA || response.Tasks[0].AuthToken == "" || response.ClaimPollHintSupported {
 					t.Fatalf("partial response lost A or enabled long polling: %+v", response)
@@ -190,10 +190,10 @@ func TestBatchClaimDeadlines(t *testing.T) {
 		caller          time.Duration
 		build, response time.Duration
 	}{
-		{name: "HTTP without deadline", build: 3750 * time.Millisecond, response: 4750 * time.Millisecond},
-		{name: "WS budget", caller: 5 * time.Second, build: 3750 * time.Millisecond, response: 4750 * time.Millisecond},
+		{name: "HTTP without deadline", build: 13750 * time.Millisecond, response: 14750 * time.Millisecond},
+		{name: "WS budget", caller: protocol.DaemonBatchClaimRequestTimeout, build: 13750 * time.Millisecond, response: 14750 * time.Millisecond},
 		{name: "shorter caller", caller: 2 * time.Second, build: 1300 * time.Millisecond, response: 1800 * time.Millisecond},
-		{name: "longer caller", caller: 30 * time.Second, build: 3750 * time.Millisecond, response: 4750 * time.Millisecond},
+		{name: "longer caller", caller: 30 * time.Second, build: 13750 * time.Millisecond, response: 14750 * time.Millisecond},
 		{name: "expired caller", caller: -time.Second, build: -time.Second, response: -time.Second},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
