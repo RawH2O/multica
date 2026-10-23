@@ -73,7 +73,7 @@ func TestClaimTasksByRuntime_DeadlineRecoveryOverWebSocket(t *testing.T) {
 			t.Fatal(err)
 		}
 		payload, err := json.Marshal(protocol.RPCRequestPayload{
-			RequestID: requestID, Method: "tasks.claim", TimeoutMs: 5000, Body: body,
+			RequestID: requestID, Method: "tasks.claim", TimeoutMs: int(protocol.DaemonBatchClaimRequestTimeout.Milliseconds()), Body: body,
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -81,7 +81,7 @@ func TestClaimTasksByRuntime_DeadlineRecoveryOverWebSocket(t *testing.T) {
 		if err := conn.WriteJSON(protocol.Message{Type: protocol.EventDaemonRPCRequest, Payload: payload}); err != nil {
 			t.Fatal(err)
 		}
-		// Match the installed daemon's five-second budget plus two-second grace.
+		// Match the installed daemon's batch-claim budget plus two-second grace.
 		if err := conn.SetReadDeadline(time.Now().Add(protocol.DaemonBatchClaimRequestTimeout + 2*time.Second)); err != nil {
 			t.Fatal(err)
 		}
