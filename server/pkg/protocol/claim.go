@@ -2,7 +2,10 @@ package protocol
 
 import "time"
 
-// DaemonBatchClaimRequestTimeout is the existing HTTP client timeout and WS
-// execution budget. Servers must leave room inside it for claim recovery and
-// response delivery so installed daemons can still receive partial batches.
-const DaemonBatchClaimRequestTimeout = 5 * time.Second
+// DaemonBatchClaimRequestTimeout is the HTTP client timeout and WS execution
+// budget for a machine-level batch claim. The claim response may require
+// several cross-region database round trips while loading agent skills,
+// plugins, and MCP connections, so keep enough time for those payload queries
+// while still leaving room inside the budget for claim recovery and response
+// delivery.
+const DaemonBatchClaimRequestTimeout = 15 * time.Second
