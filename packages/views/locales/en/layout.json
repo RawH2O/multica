@@ -12,7 +12,9 @@
     "runtimes": "Runtimes",
     "skills": "Skills",
     "hooks": "Hooks",
-    "settings": "Settings"
+    "settings": "Settings",
+    "views": "Views",
+    "docs": "Docs"
   },
   "tab": {
     "issue": "Issue",

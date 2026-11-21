@@ -12,7 +12,9 @@
     "runtimes": "런타임",
     "skills": "스킬",
     "hooks": "Hooks",
-    "settings": "설정"
+    "settings": "설정",
+    "views": "Views",
+    "docs": "Docs"
   },
   "tab": {
     "issue": "태스크",
