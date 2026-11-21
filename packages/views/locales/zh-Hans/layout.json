@@ -12,7 +12,9 @@
     "runtimes": "运行时",
     "skills": "Skills",
     "hooks": "Hooks",
-    "settings": "设置"
+    "settings": "设置",
+    "views": "视图",
+    "docs": "文档"
   },
   "tab": {
     "issue": "任务",

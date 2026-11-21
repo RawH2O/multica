@@ -65,8 +65,29 @@ checksum:
 
 changelog:
   sort: asc
+  use: github
+  # Only author logins should create contributor mentions, not product syntax
+  # such as @all in commit subjects. Keep every commit so all authors get credit.
+  format: '{{ .SHA }} {{ replace .Message "@" "@<!-- -->" }}{{ if .Logins }} ({{ .Logins | englishJoin }}){{ end }}'
   filters:
     exclude:
       - "^docs:"
       - "^test:"
       - "^chore:"
+
+brews:
+  - name: multica
+    ids:
+      - versioned
+    repository:
+      owner: multica-ai
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/multica-ai/multica"
+    description: "Multica CLI — local agent runtime and management tool for the Multica platform"
+    install: |
+      bin.install "multica"
+    test: |
+      system "#{bin}/multica", "version"

@@ -627,6 +627,9 @@ WITH deleted_squads AS (
     DELETE FROM squad WHERE squad.workspace_id = $1
 ), deleted_hooks AS (
     DELETE FROM hook WHERE hook.workspace_id = $1
+), deleted_skill_versions AS (
+    DELETE FROM skill_version
+    WHERE skill_version.skill_id IN (SELECT skill.id FROM skill WHERE skill.workspace_id = $1)
 )
 DELETE FROM skill WHERE skill.workspace_id = $1
 `
