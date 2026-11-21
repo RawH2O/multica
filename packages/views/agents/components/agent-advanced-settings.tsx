@@ -24,6 +24,7 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { cn } from "@multica/ui/lib/utils";
 import { SkillsTab } from "./tabs/skills-tab";
+import { HooksTab } from "./tabs/hooks-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
@@ -41,6 +42,7 @@ export type AdvancedSection =
   | "custom_args"
   | "runtime_config"
   | "skills"
+  | "hooks"
   | "mcp_config"
   | "composio_mcp";
 
@@ -52,6 +54,7 @@ type SectionLabelKey =
   | "runtime_config"
   | "qoder_agent"
   | "skills"
+  | "hooks"
   | "mcp_config"
   | "composio_mcp";
 
@@ -67,6 +70,7 @@ const SETTINGS_SECTIONS: SectionDef[] = [
 
 const CAPABILITY_SECTIONS: SectionDef[] = [
   { id: "skills", labelKey: "skills" },
+  { id: "hooks", labelKey: "hooks" },
   { id: "mcp_config", labelKey: "mcp_config" },
   { id: "composio_mcp", labelKey: "composio_mcp" },
 ];
@@ -311,6 +315,7 @@ export function AgentAdvancedSettings({
                       canEdit={canEdit}
                     />
                   )}
+                  {active.id === "hooks" && <HooksTab agent={agent} canEdit={canEdit} />}
                   {active.id === "mcp_config" && (
                     <McpConfigTab
                       agent={agent}
