@@ -10,6 +10,16 @@
     "all_projects": "すべてのプロジェクト",
     "period_label": "期間"
   },
+  "history_limit": {
+    "note": "現在のプランでは直近 {{days}} 日を表示できます。アップグレードするとそれ以前のデータも表示できます。データは削除されません。",
+    "fell_back": "現在のプランで表示できるのは直近 {{days}} 日です。",
+    "view_plans": "プランを見る",
+    "locked": "現在のプランに含まれていません",
+    "plan": {
+      "pro": "Pro",
+      "business": "Business"
+    }
+  },
   "kpi": {
     "cost_label": "コスト · {{days}}日",
     "tokens_label": "トークン · {{days}}日",
@@ -76,7 +86,7 @@
     "header_rate": "失敗率",
     "other_agents": "その他のエージェント",
     "low_sample": "この期間の実行が {{count}} 回未満のため、この失敗率は参考になりません。",
-    "no_data": "この期間に失敗した実行はありません。",
+    "no_data": "この期間に失敗した実行はありません",
     "show_reasons": "エラーコードを表示",
     "hide_reasons": "エラーコードを隠す",
     "show_all": "全 {{count}} 件を表示",
@@ -103,7 +113,7 @@
   },
   "empty": {
     "title": "まだ使用量はありません",
-    "body": "エージェントを実行するとトークン使用量と実行時間を確認できます。"
+    "body": "エージェントが動き始めると、トークン使用量、コスト、失敗率がここに表示されます。"
   },
   "duration": {
     "less_than_minute": "1分未満"
