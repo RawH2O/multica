@@ -276,14 +276,9 @@ type SkillContextForEnv struct {
 	Files       []SkillFileContextForEnv
 }
 
-// SkillFileContextForEnv represents a supporting file within a skill.
-type SkillFileContextForEnv struct {
-	Path    string
-	Content string
-}
-
 // HookContextForEnv is a managed hook definition to materialize in the
-// provider's task-local configuration.
+// provider's task-local configuration. Commands are intentionally strings:
+// the provider, not Multica, owns hook process execution.
 type HookContextForEnv struct {
 	Name      string
 	Command   string
@@ -291,6 +286,12 @@ type HookContextForEnv struct {
 	Events    []string
 	Matcher   string
 	Config    []byte
+}
+
+// SkillFileContextForEnv represents a supporting file within a skill.
+type SkillFileContextForEnv struct {
+	Path    string
+	Content string
 }
 
 // Environment represents a prepared, isolated execution environment.

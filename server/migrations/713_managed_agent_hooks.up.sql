@@ -1,10 +1,6 @@
--- Managed coding-agent hooks. Hooks are workspace resources, like Skills, and
--- are materialized into a provider's task-local configuration by the daemon.
--- V1 accepts Codex only; providers is kept as an array so the resource can
--- grow without changing the relationship model.
--- The fork shipped the same managed-hook schema earlier as migration 441.
--- Keep this migration replay-safe so upgrades from that history can record 589
--- without failing on the already-existing relations.
+-- Earlier fork releases created these tables under migration 441 or 589.
+-- Migration versions are tracked by their full names, so preserve existing
+-- hook data while also allowing a clean upstream installation to create them.
 CREATE TABLE IF NOT EXISTS hook (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,

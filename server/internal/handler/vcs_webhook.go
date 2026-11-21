@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
@@ -191,7 +190,8 @@ func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
 }
 
 // A system hook covers the entire GitLab instance. Only repositories explicitly
-// configured in this workspace may affect its issues.
+// configured in this workspace may affect its issues; a similarly named repo
+// on another host or under another namespace must not match.
 func gitLabSystemHookRepoAllowed(raw []byte, instanceURL, owner, name string) bool {
 	var repos []workspaceRepoRef
 	if json.Unmarshal(raw, &repos) != nil || owner == "" || name == "" {
@@ -230,7 +230,6 @@ func parseGitLabRepoURL(raw string) (*url.URL, error) {
 	}
 	return &url.URL{Scheme: "ssh", Host: raw[at+1 : colon], Path: "/" + raw[colon+1:], User: url.User(raw[:at])}, nil
 }
-
 func gitLabRepoURLMatchesInstance(repo, instance *url.URL) bool {
 	if repo.RawQuery != "" || repo.Fragment != "" {
 		return false
