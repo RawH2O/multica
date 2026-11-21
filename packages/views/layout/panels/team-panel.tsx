@@ -3,6 +3,7 @@
 import { useId, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowUpRight, BarChart3, BookOpenText, Bot, MessageSquare, Monitor, Plus, User, UserPlus, Users } from "@multica/ui/icons";
+import { Webhook } from "lucide-react";
 import { DropdownMenuItem } from "@multica/ui/components/ui/dropdown-menu";
 import { cn } from "@multica/ui/lib/utils";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
@@ -425,6 +426,12 @@ export function TeamPanel() {
               label={t(($) => $.nav.skills)}
               active={isPathWithin(pathname, p.skills())}
               trailing={<PanelCount value={skills.length} />}
+            />
+            <PanelLink
+              href={p.hooks()}
+              icon={<Webhook />}
+              label="Hooks"
+              active={isPathWithin(pathname, p.hooks())}
             />
             <PanelLink
               href={p.runtimes()}
