@@ -1019,6 +1019,9 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 			logger.Warn("execenv: refresh codex skill policy failed (non-fatal)", "error", err)
 		}
 		env.PreparedSkillNames = preparedSkillNames
+		if err := prepareCodexHooks(codexHome, params.Task.AgentHooks, logger); err != nil {
+			logger.Warn("execenv: refresh codex hooks failed", "error", err)
+		}
 	}
 
 	if params.Provider == "claude" && env.RootDir != "" {

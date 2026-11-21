@@ -723,6 +723,9 @@ const deleteWorkspaceSquadsAndSkills = `-- name: DeleteWorkspaceSquadsAndSkills 
 WITH deleted_squads AS (
     DELETE FROM squad WHERE squad.workspace_id = $1
 ),
+deleted_hooks AS (
+    DELETE FROM hook WHERE hook.workspace_id = $1
+),
 deleted_skill_versions AS (
     -- Keyed by skill_id so the delete uses idx_skill_version_skill_version.
     DELETE FROM skill_version

@@ -42,6 +42,7 @@
     "./members": "./members/index.ts",
     "./inbox": "./inbox/index.ts",
     "./runtimes": "./runtimes/index.ts",
+    "./hooks": "./hooks/index.ts",
     "./runtimes/components/provider-logo": "./runtimes/components/provider-logo.tsx",
     "./settings/components/dingtalk-mark": "./settings/components/dingtalk-mark.tsx",
     "./settings/components/lark-mark": "./settings/components/lark-mark.tsx",
