@@ -273,6 +273,7 @@ describe("AgentAdvancedSettings section lists", () => {
       "Environment",
       "Custom Args",
       "Skills",
+      "Hooks",
       "MCP",
     ]);
   });
