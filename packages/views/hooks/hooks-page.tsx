@@ -185,8 +185,6 @@ export function HooksPage() {
       <CollectionPageHeader
         icon={Webhook}
         title="Hooks"
-        count={hooks.length}
-        description="Manage Codex hooks and bind them to agents."
         actions={
           <Button size="sm" onClick={() => setEditing(null)}>
             <Plus className="mr-1.5 h-4 w-4" />

@@ -94,7 +94,7 @@ var selfReloadProbeTimeout = 10 * time.Second
 // which is what keeps them from racing each other into triggerRestart:
 //
 //   - tryAutoUpdate: poll the configured GitHub Release and, when the daemon
-//     is idle and its version differs, run the direct-download upgrade.
+//     is idle and a newer version is available, run the direct-download upgrade.
 //   - trySelfReload: notice that the binary on disk was replaced out of band
 //     and re-exec into it.
 //
@@ -190,7 +190,7 @@ func (d *Daemon) autoUpdateLoop(ctx context.Context) {
 // tryAutoUpdate runs one check-and-maybe-upgrade cycle. Bails early on any of:
 // already updating (server-triggered upgrade in flight), active tasks (defer
 // to next tick — we never interrupt running agents), version fetch failure,
-// or no release change. The function never returns an error: a check that
+// or no newer release. The function never returns an error: a check that
 // fails today will be retried at the next tick, and we don't want a transient
 // network blip to escalate to a process-level shutdown.
 func (d *Daemon) tryAutoUpdate(ctx context.Context) {
@@ -223,12 +223,7 @@ func (d *Daemon) tryAutoUpdate(ctx context.Context) {
 	if release == nil || release.TagName == "" {
 		return
 	}
-	if !isReleaseVersion(release.TagName) {
-		return
-	}
-	latestVersion := strings.TrimPrefix(strings.TrimSpace(release.TagName), "v")
-	currentVersion := strings.TrimPrefix(strings.TrimSpace(d.cfg.CLIVersion), "v")
-	if latestVersion == currentVersion {
+	if !cli.IsNewerVersion(release.TagName, d.cfg.CLIVersion) {
 		return
 	}
 
@@ -265,7 +260,7 @@ func (d *Daemon) tryAutoUpdate(ctx context.Context) {
 		}
 	}()
 
-	d.logger.Info("auto-update: fork release differs, upgrading",
+	d.logger.Info("auto-update: newer fork release available, upgrading",
 		"current", d.cfg.CLIVersion, "target", release.TagName)
 
 	output, err := d.runUpdateFn(release.TagName)
@@ -305,7 +300,7 @@ func (d *Daemon) tryAutoUpdate(ctx context.Context) {
 // overwrite never does.
 //
 // tryAutoUpdate does eventually recover the most common shape of this — the
-// running version differs from the configured fork's latest release, so it
+// running version is older than the configured fork's latest release, so it
 // re-runs the upgrade and restarts. What it cannot recover is the rest:
 // self-hosted daemons where auto-update is default-off (MUL-2381), dev builds
 // skipped by isReleaseVersion. It is also up to

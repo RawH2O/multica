@@ -179,23 +179,13 @@ func TestTryAutoUpdate_SkipsWhenVersionMatches(t *testing.T) {
 	}
 }
 
-func TestTryAutoUpdate_SwitchesToForkWhenItsVersionIsLower(t *testing.T) {
+func TestTryAutoUpdate_SkipsOlderForkRelease(t *testing.T) {
 	d, restartCalls := newAutoUpdateTestDaemon(t, "v0.4.25")
 	withStubRelease(t, &cli.GitHubRelease{TagName: "v0.0.3"}, nil)
 
-	var upgradedTo string
-	d.runUpdateFn = func(target string) (string, error) {
-		upgradedTo = target
-		return "upgraded", nil
-	}
-
 	d.tryAutoUpdate(context.Background())
-
-	if upgradedTo != "v0.0.3" {
-		t.Fatalf("runUpdateFn called with %q, want v0.0.3", upgradedTo)
-	}
-	if restartCalls.Load() != 1 {
-		t.Fatalf("triggerRestart fired %d times, want 1", restartCalls.Load())
+	if restartCalls.Load() != 0 {
+		t.Fatalf("triggerRestart fired for an older release")
 	}
 }
 

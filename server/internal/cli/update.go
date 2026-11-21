@@ -43,7 +43,19 @@ func ReleaseRepository() string {
 }
 
 func releaseAPIBaseURL() string {
-	return "https://api.github.com/repos/" + DefaultReleaseRepository + "/releases"
+	base := strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_RELEASE_API_BASE_URL")), "/")
+	if base == "" {
+		base = "https://api.github.com"
+	}
+	return base + "/repos/" + DefaultReleaseRepository + "/releases"
+}
+
+func releaseAssetDownloadURL(assetName, targetVersion, fallback string) string {
+	base := strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_RELEASE_DOWNLOAD_BASE_URL")), "/")
+	if base == "" {
+		return fallback
+	}
+	return fmt.Sprintf("%s/%s/%s", base, url.PathEscape(normalizeReleaseTag(targetVersion)), url.PathEscape(assetName))
 }
 
 // LatestReleaseURL returns the browser URL for this fork's latest release.
@@ -400,14 +412,15 @@ func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Dur
 	if err != nil {
 		return "", err
 	}
-	downloadURL := asset.BrowserDownloadURL
+	downloadURL := releaseAssetDownloadURL(asset.Name, tag, asset.BrowserDownloadURL)
 	assetName := asset.Name
 
 	// Pull the checksum manifest first so a release that is half-published
 	// (archives uploaded but checksums.txt not yet) fails before we eat the
 	// archive's bandwidth.
 	timeout := updateDownloadTimeoutOrDefault(downloadTimeout)
-	manifestData, err := fetchURLBytes(manifestAsset.BrowserDownloadURL, timeout)
+	manifestURL := releaseAssetDownloadURL(manifestAsset.Name, tag, manifestAsset.BrowserDownloadURL)
+	manifestData, err := fetchURLBytes(manifestURL, timeout)
 	if err != nil {
 		return "", fmt.Errorf("download checksum manifest: %w", err)
 	}

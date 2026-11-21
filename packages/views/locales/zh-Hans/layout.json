@@ -1,5 +1,6 @@
 {
   "nav": {
+    "hooks": "Hooks",
     "inbox": "收件箱",
     "chat": "聊天",
     "my_issues": "我的任务",

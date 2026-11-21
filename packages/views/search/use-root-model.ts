@@ -47,6 +47,7 @@ const PAGE_KEYWORDS: Record<WorkspacePageKey, string[]> = {
   runtimes: ["runtimes", "environments", "machines", "运行时"],
   docs: ["docs", "knowledge", "知识库"],
   skills: ["skills", "library", "技能"],
+  hooks: ["hooks", "webhooks"],
   settings: ["settings", "config", "preferences", "设置", "配置"],
 };
 

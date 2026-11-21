@@ -1,5 +1,6 @@
 {
   "nav": {
+    "hooks": "Hooks",
     "inbox": "Входящие",
     "chat": "Чат",
     "my_issues": "Мои задачи",

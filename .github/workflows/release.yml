@@ -41,6 +41,7 @@ jobs:
 
           if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
             tag="$GITHUB_REF_NAME"
+            echo "Triggered by tag: $tag"
           else
             git fetch --tags --force origin
             max_major=0
@@ -62,8 +63,6 @@ jobs:
             done < <(git tag --list 'v*')
             tag="v${max_major}.${max_minor}.$((max_patch + 1))"
             echo "Generated release tag for ${GITHUB_REF_NAME}: $tag"
-          else
-            echo "Triggered by tag: $tag"
           fi
 
           if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then

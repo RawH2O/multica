@@ -1,5 +1,6 @@
 {
   "nav": {
+    "hooks": "Hooks",
     "inbox": "Bandeja de entrada",
     "chat": "Chat",
     "my_issues": "Mis tareas",
