@@ -232,6 +232,33 @@ func (q *Queries) DeleteWorkspaceConnections(ctx context.Context, workspaceID pg
 	return err
 }
 
+const deleteWorkspaceDashboardRangeViews = `-- name: DeleteWorkspaceDashboardRangeViews :exec
+DELETE FROM dashboard_range_view WHERE workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceDashboardRangeViews(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceDashboardRangeViews, workspaceID)
+	return err
+}
+
+const deleteWorkspaceEntitlementFeatureAttempts = `-- name: DeleteWorkspaceEntitlementFeatureAttempts :exec
+DELETE FROM entitlement_feature_attempt WHERE workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceEntitlementFeatureAttempts(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceEntitlementFeatureAttempts, workspaceID)
+	return err
+}
+
+const deleteWorkspaceEntitlementLimitOverages = `-- name: DeleteWorkspaceEntitlementLimitOverages :exec
+DELETE FROM entitlement_limit_overage WHERE workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceEntitlementLimitOverages(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceEntitlementLimitOverages, workspaceID)
+	return err
+}
+
 const deleteWorkspaceIssueRoots = `-- name: DeleteWorkspaceIssueRoots :exec
 WITH deleted_wakeup_receipts AS (
  DELETE FROM issue_wakeup_receipt WHERE wakeup_id IN (SELECT id FROM issue_wakeup WHERE workspace_id=$1)
@@ -628,6 +655,7 @@ WITH deleted_squads AS (
 ), deleted_hooks AS (
     DELETE FROM hook WHERE hook.workspace_id = $1
 ), deleted_skill_versions AS (
+    -- Keyed by skill_id so the delete uses idx_skill_version_skill_version.
     DELETE FROM skill_version
     WHERE skill_version.skill_id IN (SELECT skill.id FROM skill WHERE skill.workspace_id = $1)
 )
